@@ -5393,36 +5393,38 @@ void hidesafe(int bnbr)
             blithide(zeroLIFO[i], 0);
         }
     }
-    sprites_in_use--;
-    layer_in_use[spritebuff[bnbr].layer]--;
-    spritebuff[bnbr].x = 10000;
-    spritebuff[bnbr].y = 10000;
-    if (spritebuff[bnbr].layer == 0)
-        zeroLIFOremove(bnbr);
-    else
-        LIFOremove(bnbr);
-    spritebuff[bnbr].layer = -1;
-    spritebuff[bnbr].next_x = 10000;
-    spritebuff[bnbr].next_y = 10000;
-    spritebuff[bnbr].lastcollisions = 0;
-    spritebuff[bnbr].edges = 0;
-    if (found < 0)
-    {
-        found = -found;
-        for (i = found; i < zeroLIFOpointer; i++)
+    if (found!=INT_MAX){
+        sprites_in_use--;
+        layer_in_use[spritebuff[bnbr].layer]--;
+        spritebuff[bnbr].x = 10000;
+        spritebuff[bnbr].y = 10000;
+        if (spritebuff[bnbr].layer == 0)
+            zeroLIFOremove(bnbr);
+        else
+            LIFOremove(bnbr);
+        spritebuff[bnbr].layer = -1;
+        spritebuff[bnbr].next_x = 10000;
+        spritebuff[bnbr].next_y = 10000;
+        spritebuff[bnbr].lastcollisions = 0;
+        spritebuff[bnbr].edges = 0;
+        if (found < 0)
         {
-            BlitShowBuffer(zeroLIFO[i], spritebuff[zeroLIFO[i]].x, spritebuff[zeroLIFO[i]].y, 0);
+            found = -found;
+            for (i = found; i < zeroLIFOpointer; i++)
+            {
+                BlitShowBuffer(zeroLIFO[i], spritebuff[zeroLIFO[i]].x, spritebuff[zeroLIFO[i]].y, 0);
+            }
+            for (i = 0; i < LIFOpointer; i++)
+            {
+                BlitShowBuffer(LIFO[i], spritebuff[LIFO[i]].x, spritebuff[LIFO[i]].y, 0);
+            }
         }
-        for (i = 0; i < LIFOpointer; i++)
+        else
         {
-            BlitShowBuffer(LIFO[i], spritebuff[LIFO[i]].x, spritebuff[LIFO[i]].y, 0);
-        }
-    }
-    else if(found!=INT_MAX)
-    {
-        for (i = found; i < LIFOpointer; i++)
-        {
-            BlitShowBuffer(LIFO[i], spritebuff[LIFO[i]].x, spritebuff[LIFO[i]].y, 0);
+            for (i = found; i < LIFOpointer; i++)
+            {
+                BlitShowBuffer(LIFO[i], spritebuff[LIFO[i]].x, spritebuff[LIFO[i]].y, 0);
+            }
         }
     }
 }
