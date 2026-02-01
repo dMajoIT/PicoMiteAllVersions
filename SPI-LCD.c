@@ -1228,7 +1228,7 @@ void MIPS16 InitDisplaySPI(int InitOnly)
 		uSec(20000);
 		spi_write_command(0x20); // We must send 0x20 before modifying the display control mode
 		uSec(20000);
-		spi_write_command(0x0C); // Set display control, normal mode. 0x0D for inverse, 0x0C for normal
+		spi_write_command(Option.BGR ? 0x0D : 0x0C); // Set display control, normal mode. 0x0D for inverse, 0x0C for normal
 		uSec(20000);
 		break;
 	case SSD1306SPI:

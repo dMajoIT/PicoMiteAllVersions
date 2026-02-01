@@ -7382,6 +7382,12 @@ void fun_sprite(void)
                 short *boundstop = sp->boundstop;
                 short *boundsbottom = sp->boundsbottom;
 
+                // Get rotation to transform coordinates for bounds checking
+                // Bounds arrays are calculated from original sprite orientation
+                // but sprite may be displayed flipped, so we need to transform
+                // the background pixel coordinates to match original orientation
+                int rotation = sp->rotation;
+
                 // Scan all pixels in the background store
                 for (int py = 0; py < sh; ++py)
                 {
@@ -7420,11 +7426,16 @@ void fun_sprite(void)
                         if (iret == 0)
                             iret = 1;
 
+                        // Transform coordinates to match original sprite orientation
+                        // for bounds checking (bounds are from unrotated sprite)
+                        int bx = (rotation & 1) ? (sw - 1 - px) : px; // horizontal flip
+                        int by = (rotation & 2) ? (sh - 1 - py) : py; // vertical flip
+
                         // Check if this background pixel overlaps with sprite's non-transparent area
-                        if (px >= boundsleft[py] && px <= boundsright[py])
+                        if (bx >= boundsleft[by] && bx <= boundsright[by])
                         {
-                            int leftOffset = px - boundsleft[py];
-                            int rightOffset = boundsright[py] - px;
+                            int leftOffset = bx - boundsleft[by];
+                            int rightOffset = boundsright[by] - bx;
                             if (leftOffset > bgc[4])
                             {
                                 bgc[4] = leftOffset;
@@ -7436,10 +7447,10 @@ void fun_sprite(void)
                                 iret = 2;
                             }
                         }
-                        if (py >= boundstop[px] && py <= boundsbottom[px])
+                        if (by >= boundstop[bx] && by <= boundsbottom[bx])
                         {
-                            int topOffset = py - boundstop[px];
-                            int bottomOffset = boundsbottom[px] - py;
+                            int topOffset = by - boundstop[bx];
+                            int bottomOffset = boundsbottom[bx] - by;
                             if (topOffset > bgc[6])
                             {
                                 bgc[6] = topOffset;
