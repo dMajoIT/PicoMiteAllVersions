@@ -1610,6 +1610,7 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size, bool cmdf
                 break;
 
             // F9 - Import file at current position
+            case CTRLKEY('O'):
             case F9:
             {
                 // Get filename from user
@@ -1701,6 +1702,7 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size, bool cmdf
             break;
 
             // F10 - Export clipboard to file
+            case CTRLKEY('B'):
             case F10:
             {
                 // Check if clipboard has content
@@ -2163,6 +2165,7 @@ void MarkMode(unsigned char *cb, unsigned char *buf)
         case CTRLKEY('T'):
         case F5:
         case F4:
+        case CTRLKEY('B'):
         case F10:
             if (txtp - mark > MAXCLIP || mark - txtp > MAXCLIP)
             {
