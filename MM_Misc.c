@@ -5898,6 +5898,8 @@ void MIPS16 cmd_option(void)
                 ConfigDisplaySSD(tp);
             if (!Option.DISPLAY_TYPE)
                 ConfigDisplayI2C(tp);
+            if (!Option.DISPLAY_TYPE)
+                SyntaxError();
         }
         SaveOptions();
         SoftReset(SOFT_RESET);

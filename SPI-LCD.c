@@ -4074,7 +4074,7 @@ void Display_Refresh(void)
 	if (Option.DISPLAY_TYPE >= NEXTGEN || Option.DISPLAY_TYPE == 0 || !(Option.DISPLAY_TYPE <= I2C_PANEL || Option.DISPLAY_TYPE >= BufferedPanel))
 		return;
 #else
-	if (!(Option.DISPLAY_TYPE <= I2C_PANEL || Option.DISPLAY_TYPE >= BufferedPanel))
+	if (Option.DISPLAY_TYPE == 0 || !(Option.DISPLAY_TYPE <= I2C_PANEL || Option.DISPLAY_TYPE >= BufferedPanel))
 		return;
 #endif
 	unsigned char *p = (void *)((unsigned int)LCDBuffer);

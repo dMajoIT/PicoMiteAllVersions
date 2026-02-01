@@ -28,8 +28,8 @@ list all
 ************************************************************************************************************************/
 
 #define VERSION "6.02.01b0" // define the version number
-#define YEAR "2011-2025"    // and the year
-#define YEAR2 "2016-2025"
+#define YEAR "2011-2026"    // and the year
+#define YEAR2 "2016-2026"
 #ifdef rp2350
 #define CHIP "RP2350 "
 #else
