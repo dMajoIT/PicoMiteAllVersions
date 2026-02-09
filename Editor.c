@@ -26,6 +26,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * @file Audio.c
  * @author Geoff Graham, Peter Mather
  * @brief Source for Editor MMBasic commands
+ *  Includes bug fix for non-standard colours from Ernst Bokkelkamp
  */
 /**
  * @cond
@@ -489,15 +490,22 @@ void edit(unsigned char *cmdline, bool cmdfile)
 #endif
     if (Option.ColourCode)
     {
+        OriginalFC = gui_fcolour; // *EB*
+        OriginalBC = gui_bcolour; // *EB*
         gui_fcolour = WHITE;
         gui_bcolour = BLACK;
+        ClearScreen(gui_bcolour);
     }
     if (Option.DISPLAY_CONSOLE == true && HRes / gui_font_width < 32)
         error("Font is too large");
     if (cmdfile)
     {
         ClearVars(0, true);
-        ClearRuntime(true);
+        int tf = gui_fcolour;
+        int tb = gui_bcolour; // *EB*
+        ClearRuntime(true);   // *EB*
+        gui_bcolour = tb;
+        gui_fcolour = tf; // *EB*
     }
     if (HRes == 640 || HRes == 512 || HRes == 848 || HRes == 720)
     {
@@ -1432,7 +1440,12 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size, bool cmdf
                 Option.Refresh = RefreshSave;
 #endif
                 if (c != ESC && TextChanged && fname == NULL)
+                {
+                    gui_bcolour = OriginalBC; // *EB*
+                    gui_fcolour = OriginalFC; // *EB*
+                    ClearScreen(gui_bcolour); // *EB*
                     SaveToProgMemory();
+                }
                 if (c != ESC && TextChanged && fname)
                 {
                     int fnbr1;
@@ -1830,6 +1843,7 @@ void MarkMode(unsigned char *cb, unsigned char *buf)
 {
     unsigned char *p, *mark, *oldmark;
     int c = -1, x, y, i, oldx, oldy, txtpx, txtpy, errmsg = false;
+    int edx_save = edx, edy_save = edy;
 #ifdef PICOMITEVGA
     int fontinc = gui_font_width / 8;
 #endif
@@ -1981,6 +1995,9 @@ void MarkMode(unsigned char *cb, unsigned char *buf)
             }
             curx = txtpx;
             cury = txtpy; // just an escape key
+            edx = edx_save;
+            edy = edy_save;
+            SCursor(curx, cury);
             return;
 
         case CTRLKEY('E'):
@@ -2167,25 +2184,29 @@ void MarkMode(unsigned char *cb, unsigned char *buf)
         case F4:
         case CTRLKEY('B'):
         case F10:
-            if (txtp - mark > MAXCLIP || mark - txtp > MAXCLIP)
+            if (c != F10 && (txtp - mark > MAXCLIP || mark - txtp > MAXCLIP))
             {
-                editDisplayMsg((unsigned char *)" MARKED TEXT EXCEEDS CLIPBOARD BUFFER SIZE");
+                editDisplayMsg((unsigned char *)" MARKED TEXT EXCEEDS BUFFER SIZE");
                 errmsg = true;
-                break;
+                SCursor(curx, cury);
+                continue;
             }
-            if (mark <= txtp)
+            if (c != F10)
             {
-                p = mark;
-                while (p < txtp)
-                    *cb++ = *p++;
+                if (mark <= txtp)
+                {
+                    p = mark;
+                    while (p < txtp)
+                        *cb++ = *p++;
+                }
+                else
+                {
+                    p = txtp;
+                    while (p <= mark - 1)
+                        *cb++ = *p++;
+                }
+                *cb = 0;
             }
-            else
-            {
-                p = txtp;
-                while (p <= mark - 1)
-                    *cb++ = *p++;
-            }
-            *cb = 0;
             if (c == F5 || c == CTRLKEY('Y') || c == F10)
             {
                 // For F10, also export to file before returning
@@ -2560,8 +2581,7 @@ void SetColour(unsigned char *p, int DoVT100)
     }
     if (*p == '/' && p[1] == '*' && !inquote)
     {
-        unsigned char *q = p;
-        if (*(--q) == (unsigned char)'\n')
+        if (p == EdBuff || p[-1] == (unsigned char)'\n')
         {
             gui_fcolour = GUI_C_COMMENT;
             if (DoVT100)
@@ -2863,12 +2883,17 @@ int editInsertChar(unsigned char c, char *multi, int edit_buff_size)
     for (; p >= txtp; p--)
         *(p + 1) = *p; // shift everything down
     *multi = 0;
-    p = txtp - 1;
-    if ((c == '/' && *p == '*') || (c == '*' && *p == '/'))
-        *multi = 1;
-    p += 2;
-    if ((c == '/' && *p == '*') || (c == '*' && *p == '/'))
-        *multi = 1;
+    if (txtp > EdBuff)
+    {
+        unsigned char prev = *(txtp - 1);
+        if ((c == '/' && prev == '*') || (c == '*' && prev == '/'))
+            *multi = 1;
+    }
+    {
+        unsigned char next = *(txtp + 1);
+        if ((c == '/' && next == '*') || (c == '*' && next == '/'))
+            *multi = 1;
+    }
     *txtp++ = c; // and insert our char
     return true;
 }
@@ -2983,8 +3008,6 @@ void SaveToProgMemory(void)
 void GetInputString(unsigned char *prompt)
 {
     int i;
-    unsigned char *p;
-
     SCursor(0, VHeight + 1);
     PrintString((char *)prompt);
     MX470Cursor(0, (VRes / gui_font_height) * gui_font_height - gui_font_height);
@@ -2996,30 +3019,40 @@ void GetInputString(unsigned char *prompt)
     }
     SCursor(strlen((char *)prompt), VHeight + 1);
     MX470Cursor(strlen((char *)prompt) * gui_font_width, (VRes / gui_font_height) * gui_font_height - gui_font_height);
-    for (p = inpbuf; (*p = MMgetchar()) != '\r'; p++)
+    int len = 0;
+    int maxlen = STRINGSIZE - 1;
+    while (1)
     { // get the input
-        if (*p == 0xb3 || *p == F3 || *p == ESC)
+        unsigned char ch = MMgetchar();
+        if (ch == '\r')
+            break;
+        if (ch == 0xb3 || ch == F3 || ch == ESC)
         {
-            p++;
+            if (len < maxlen)
+                inpbuf[len++] = ch;
             break;
         } // return if it is SHIFT-F3, F3 or ESC
-        if (isprint(*p))
+        if (ch == '\b')
         {
-            SSputchar(*p, 1); // echo the char
-            MX470PutC(*p);    // echo the char on the MX470 display
-        }
-        if (*p == '\b')
-        {
-            p--; // backspace over a backspace
-            if (p >= inpbuf)
+            if (len > 0)
             {
-                p--;                                          // and the char before
+                len--;
                 PrintString("\b \b");                         // erase on the screen
                 MX470PutS("\b \b", gui_fcolour, gui_bcolour); // erase on the MX470 display
             }
+            continue;
+        }
+        if (isprint(ch))
+        {
+            if (len < maxlen)
+            {
+                inpbuf[len++] = ch;
+                SSputchar(ch, 1); // echo the char
+                MX470PutC(ch);    // echo the char on the MX470 display
+            }
         }
     }
-    *p = 0; // terminate the input string
+    inpbuf[len] = 0; // terminate the input string
     PrintFunctKeys(EDIT);
     PositionCursor(txtp);
 }
