@@ -224,7 +224,7 @@ void SetAndReserve(int pin, int inp, int init, int type)
 
 void MIPS16 ConfigDisplaySPI(unsigned char *p)
 {
-	char code, CD, RESET, CS = 0;
+	char CD, RESET, CS = 0;
 	uint8_t BACKLIGHT = 0;
 	int DISPLAY_TYPE = 0;
 	int orientation = 1;
@@ -371,23 +371,11 @@ void MIPS16 ConfigDisplaySPI(unsigned char *p)
 	Option.DISPLAY_ORIENTATION = orientation;
 	if (DISPLAY_TYPE == ST7789 || DISPLAY_TYPE == ST7789A || DISPLAY_TYPE == ST7789A)
 		Option.DISPLAY_ORIENTATION = (Option.DISPLAY_ORIENTATION + 2) % 4;
-	if (!(code = codecheck(argv[4])))
-		argv[4] += 2;
-	CD = getinteger(argv[4]);
-	if (!code)
-		CD = codemap(CD);
-	if (!(code = codecheck(argv[6])))
-		argv[6] += 2;
-	RESET = getinteger(argv[6]);
-	if (!code)
-		RESET = codemap(RESET);
+	CD = getpinarg(argv[4]);
+	RESET = getpinarg(argv[6]);
 	if (DISPLAY_TYPE != ST7920)
 	{
-		if (!(code = codecheck(argv[8])))
-			argv[8] += 2;
-		CS = getinteger(argv[8]);
-		if (!code)
-			CS = codemap(CS);
+		CS = getpinarg(argv[8]);
 		Option.LCDVOP = 0xB1;
 		Option.I2Coffset = 0;
 		if (argc >= 11 && *argv[10])
@@ -398,11 +386,7 @@ void MIPS16 ConfigDisplaySPI(unsigned char *p)
 				Option.I2Coffset = getint(argv[10], 0, 10);
 			else
 			{
-				if (!(code = codecheck(argv[10])))
-					argv[10] += 2;
-				BACKLIGHT = getinteger(argv[10]);
-				if (!code)
-					BACKLIGHT = codemap(BACKLIGHT);
+				BACKLIGHT = getpinarg(argv[10]);
 				CheckPin(BACKLIGHT, CP_IGNORE_INUSE);
 				if ((PinDef[BACKLIGHT].slice & 0x7f) == Option.AUDIO_SLICE)
 					error("Channel in use for Audio");

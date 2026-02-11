@@ -2778,19 +2778,15 @@ static int checkparam(char *p, int n, char *test1, ...)
 }
 
 // Helper function to parse a pin number (accepts physical pin or GPxx format)
+// Now delegates to the global getpinarg() function
 static int parse_pin(unsigned char *arg)
 {
-    unsigned char code;
-    if (!(code = codecheck(arg)))
-    {
-        arg += 2; // Skip "GP" prefix
-    }
-    int pin = getinteger(arg);
-    if (!code)
-    {
-        pin = codemap(pin); // Convert GPIO number to physical pin
-    }
-    return pin;
+    // Stepper uses 0 as a "no pin" sentinel for optional pins (spindle, max limits).
+    // Check for literal 0 before calling getpinarg which would reject it as invalid.
+    skipspace(arg);
+    if (*arg == '0' && !isnamechar(arg[1]) && arg[1] != '.')
+        return 0;
+    return getpinarg(arg);
 }
 
 // Helper function to automatically calculate and set a reasonable default jerk
@@ -3390,15 +3386,11 @@ void cmd_stepper(void)
 
         // Get step pin (required) - accepts physical pin or GPxx format
         int step_pin = parse_pin(argv[2]);
-        if (IsInvalidPin(step_pin))
-            stepper_error("Invalid step pin");
         CheckPin(step_pin, CP_IGNORE_INUSE);
         axis->step_pin = PinDef[step_pin].GPno;
 
         // Get direction pin (required) - accepts physical pin or GPxx format
         int dir_pin = parse_pin(argv[4]);
-        if (IsInvalidPin(dir_pin))
-            stepper_error("Invalid dir pin");
         CheckPin(dir_pin, CP_IGNORE_INUSE);
         axis->dir_pin = PinDef[dir_pin].GPno;
 
@@ -3421,8 +3413,6 @@ void cmd_stepper(void)
             int enable_pin = parse_pin(argv[6]);
             if (enable_pin != 0)
             {
-                if (IsInvalidPin(enable_pin))
-                    stepper_error("Invalid enable pin");
                 CheckPin(enable_pin, CP_IGNORE_INUSE);
                 axis->enable_pin = PinDef[enable_pin].GPno;
                 gpio_init(axis->enable_pin);
@@ -3648,8 +3638,6 @@ void cmd_stepper(void)
             return;
         }
 
-        if (IsInvalidPin(spindle_pin))
-            stepper_error("Invalid spindle pin");
         CheckPin(spindle_pin, CP_IGNORE_INUSE);
 
         stepper_system.spindle_pin = PinDef[spindle_pin].GPno;
@@ -3679,9 +3667,6 @@ void cmd_stepper(void)
         int x_min_pin = parse_pin(argv[0]);
         int y_min_pin = parse_pin(argv[2]);
         int z_min_pin = parse_pin(argv[4]);
-
-        if (IsInvalidPin(x_min_pin) || IsInvalidPin(y_min_pin) || IsInvalidPin(z_min_pin))
-            stepper_error("Invalid limit pin");
 
         CheckPin(x_min_pin, CP_IGNORE_INUSE);
         CheckPin(y_min_pin, CP_IGNORE_INUSE);
@@ -3720,7 +3705,7 @@ void cmd_stepper(void)
         if (argc >= 7 && *argv[6])
         {
             int x_max_pin = parse_pin(argv[6]);
-            if (!IsInvalidPin(x_max_pin) && x_max_pin != 0)
+            if (x_max_pin != 0)
             {
                 CheckPin(x_max_pin, CP_IGNORE_INUSE);
                 stepper_system.x_max_limit_pin = PinDef[x_max_pin].GPno;
@@ -3735,7 +3720,7 @@ void cmd_stepper(void)
         if (argc >= 9 && *argv[8])
         {
             int y_max_pin = parse_pin(argv[8]);
-            if (!IsInvalidPin(y_max_pin) && y_max_pin != 0)
+            if (y_max_pin != 0)
             {
                 CheckPin(y_max_pin, CP_IGNORE_INUSE);
                 stepper_system.y_max_limit_pin = PinDef[y_max_pin].GPno;
@@ -3750,7 +3735,7 @@ void cmd_stepper(void)
         if (argc >= 11 && *argv[10])
         {
             int z_max_pin = parse_pin(argv[10]);
-            if (!IsInvalidPin(z_max_pin) && z_max_pin != 0)
+            if (z_max_pin != 0)
             {
                 CheckPin(z_max_pin, CP_IGNORE_INUSE);
                 stepper_system.z_max_limit_pin = PinDef[z_max_pin].GPno;

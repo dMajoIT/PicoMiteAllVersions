@@ -183,13 +183,8 @@ void cmd_ds18b20(void)
 	getcsargs(&cmdline, 5);
 	if (argc < 1)
 		StandardError(2);
-	char code;
 
-	if (!(code = codecheck(argv[0])))
-		argv[0] += 2;
-	pin = getinteger(argv[0]);
-	if (!code)
-		pin = codemap(pin);
+	pin = getpinarg(argv[0]);
 	precision = 1;
 	if (argc >= 3 && *argv[2])
 		precision = getint(argv[2], 0, 3);
@@ -209,13 +204,8 @@ void fun_ds18b20(void)
 	if (!(argc == 1 || argc == 3))
 		SyntaxError();
 	;
-	char code;
 	int timeout = 200000;
-	if (!(code = codecheck(argv[0])))
-		argv[0] += 2;
-	pin = getinteger(argv[0]);
-	if (!code)
-		pin = codemap(pin);
+	pin = getpinarg(argv[0]);
 	if (argc == 3)
 		timeout = getint(argv[2], 100, 2000) * 1000;
 	if (ds18b20Timers == NULL || ds18b20Timers[pin] == 0)
@@ -271,12 +261,7 @@ void owReset(unsigned char *p)
 {
 	int pin;
 
-	char code;
-	if (!(code = codecheck(p)))
-		p += 2;
-	pin = getinteger(p);
-	if (!code)
-		pin = codemap(pin);
+	pin = getpinarg(p);
 	ow_pinChk(pin);
 
 	// set up initial pin status (open drain, output, high)
@@ -328,12 +313,7 @@ void owWrite(unsigned char *p)
 	getcsargs(&p, MAX_ARG_COUNT * 2);
 	if (!(argc & 0x01) || (argc < 7))
 		StandardError(2);
-	char code;
-	if (!(code = codecheck(argv[0])))
-		argv[0] += 2;
-	pin = getinteger(argv[0]);
-	if (!code)
-		pin = codemap(pin);
+	pin = getpinarg(argv[0]);
 	ow_pinChk(pin);
 
 	flag = getint(argv[2], 0, 15);
@@ -399,12 +379,7 @@ void owRead(unsigned char *p)
 	getcsargs(&p, MAX_ARG_COUNT * 2);
 	if (!(argc & 0x01) || (argc < 7))
 		StandardError(2);
-	char code;
-	if (!(code = codecheck(argv[0])))
-		argv[0] += 2;
-	pin = getinteger(argv[0]);
-	if (!code)
-		pin = codemap(pin);
+	pin = getpinarg(argv[0]);
 	ow_pinChk(pin);
 
 	flag = getint(argv[2], 0, 15);
@@ -475,12 +450,7 @@ void fun_owSearch(void)
 	getcsargs(&ep, MAX_ARG_COUNT * 2);
 	if (!(argc & 0x01) || (argc < 3))
 		StandardError(2);
-	char code;
-	if (!(code = codecheck(argv[0])))
-		argv[0] += 2;
-	pin = getinteger(argv[0]);
-	if (!code)
-		pin = codemap(pin);
+	pin = getpinarg(argv[0]);
 	ow_pinChk(pin);
 
 	flag = getinteger(argv[2]);

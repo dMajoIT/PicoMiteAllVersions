@@ -2750,15 +2750,8 @@ void MIPS16 cmd_camera(void)
       StandardError(44);
     if (XCLK)
       error("Camera already open");
-    unsigned char code;
     // XCLK pin
-    if (!(code = codecheck(argv[0])))
-      argv[0] += 2;
-    pin1 = getinteger(argv[0]);
-    if (!code)
-      pin1 = codemap(pin1);
-    if (IsInvalidPin(pin1))
-      StandardError(9);
+    pin1 = getpinarg(argv[0]);
     if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
       StandardErrorParam2(27, pin1, pin1);
     int slice = getslice(pin1);
@@ -2768,57 +2761,27 @@ void MIPS16 cmd_camera(void)
       error("Channel in use for Audio");
 
     // PCLK pin
-    if (!(code = codecheck(argv[2])))
-      argv[2] += 2;
-    pin2 = getinteger(argv[2]);
-    if (!code)
-      pin2 = codemap(pin2);
-    if (IsInvalidPin(pin2))
-      StandardError(9);
+    pin2 = getpinarg(argv[2]);
     if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
       StandardErrorParam2(27, pin2, pin2);
 
     // HREF pin
-    if (!(code = codecheck(argv[4])))
-      argv[4] += 2;
-    pin3 = getinteger(argv[4]);
-    if (!code)
-      pin3 = codemap(pin3);
-    if (IsInvalidPin(pin3))
-      StandardError(9);
+    pin3 = getpinarg(argv[4]);
     if (ExtCurrentConfig[pin3] != EXT_NOT_CONFIG)
       StandardErrorParam2(27, pin3, pin3);
 
     // VSYNC pin
-    if (!(code = codecheck(argv[6])))
-      argv[6] += 2;
-    pin4 = getinteger(argv[6]);
-    if (!code)
-      pin4 = codemap(pin4);
-    if (IsInvalidPin(pin4))
-      StandardError(9);
+    pin4 = getpinarg(argv[6]);
     if (ExtCurrentConfig[pin4] != EXT_NOT_CONFIG)
       StandardErrorParam2(27, pin4, pin4);
 
     // RESET pin
-    if (!(code = codecheck(argv[8])))
-      argv[8] += 2;
-    pin5 = getinteger(argv[8]);
-    if (!code)
-      pin5 = codemap(pin5);
-    if (IsInvalidPin(pin5))
-      StandardError(9);
+    pin5 = getpinarg(argv[8]);
     if (ExtCurrentConfig[pin5] != EXT_NOT_CONFIG)
       StandardErrorParam2(27, pin5, pin5);
 
     // D0-D7 pins
-    if (!(code = codecheck(argv[10])))
-      argv[10] += 2;
-    pin6 = getinteger(argv[10]);
-    if (!code)
-      pin6 = codemap(pin6);
-    if (IsInvalidPin(pin6))
-      StandardError(9);
+    pin6 = getpinarg(argv[10]);
     int startdata = PinDef[pin6].GPno;
     for (int i = startdata; i < startdata + 8; i++)
     {

@@ -146,52 +146,15 @@ void MIPS16 ConfigTouch(unsigned char *p)
     }
 
     // Parse and validate pin1
-    unsigned char code;
-    if (!(code = codecheck(argv[0])))
-    {
-        argv[0] += 2;
-    }
-    pin1 = getinteger(argv[0]);
-    if (!code)
-    {
-        pin1 = codemap(pin1);
-    }
-    if (IsInvalidPin(pin1))
-    {
-        StandardError(9);
-    }
+    pin1 = getpinarg(argv[0]);
 
     // Parse and validate pin2
-    if (!(code = codecheck(argv[2])))
-    {
-        argv[2] += 2;
-    }
-    pin2 = getinteger(argv[2]);
-    if (!code)
-    {
-        pin2 = codemap(pin2);
-    }
-    if (IsInvalidPin(pin2))
-    {
-        StandardError(9);
-    }
+    pin2 = getpinarg(argv[2]);
 
     // Parse and validate pin3 (optional)
     if (argc >= 5 && *argv[4])
     {
-        if (!(code = codecheck(argv[4])))
-        {
-            argv[4] += 2;
-        }
-        pin3 = getinteger(argv[4]);
-        if (!code)
-        {
-            pin3 = codemap(pin3);
-        }
-        if (IsInvalidPin(pin3))
-        {
-            StandardError(9);
-        }
+        pin3 = getpinarg(argv[4]);
     }
 
     // Parse threshold for capacitive touch

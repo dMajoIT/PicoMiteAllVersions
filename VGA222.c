@@ -709,19 +709,11 @@ void MIPS16 ConfigDisplay222(unsigned char *p)
         return;
     if (argc != 5)
         SyntaxError();
-    int hspin, datapin, code;
+    int hspin, datapin;
     Option.DISPLAY_TYPE = DISPLAY_TYPE;
     Option.DISPLAY_ORIENTATION = LANDSCAPE;
-    if (!(code = codecheck(argv[2])))
-        argv[2] += 2;
-    hspin = getinteger(argv[2]);
-    if (!code)
-        hspin = codemap(hspin);
-    if (!(code = codecheck(argv[4])))
-        argv[4] += 2;
-    datapin = getinteger(argv[4]);
-    if (!code)
-        datapin = codemap(datapin);
+    hspin = getpinarg(argv[2]);
+    datapin = getpinarg(argv[4]);
     CheckPin(hspin, CP_IGNORE_INUSE);
     CheckPin(datapin, CP_IGNORE_INUSE);
     CheckPin(PINMAP[PinDef[hspin].GPno + 1], CP_IGNORE_INUSE);

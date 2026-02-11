@@ -614,15 +614,8 @@ void start_i2s(int pior, int sm)
 }
 int getGPpin(unsigned char *pinarg, int pio, int base)
 {
-        char code;
         int pin;
-        if (!(code = codecheck(pinarg)))
-                pinarg += 2;
-        pin = getinteger(pinarg);
-        if (!code)
-                pin = codemap(pin);
-        if (IsInvalidPin(pin))
-                StandardError(9);
+        pin = getpinarg(pinarg);
         if ((ExtCurrentConfig[pin] == EXT_PIO0_OUT && pio != 0) ||
             (ExtCurrentConfig[pin] == EXT_PIO1_OUT && pio != 1)
 #ifdef rp2350
@@ -1194,7 +1187,7 @@ void MIPS16 cmd_pio(void)
                 int sm = getint(argv[2], 0, 3);
                 nbr = getinteger(argv[4]);
                 dd = findvar(argv[6], V_FIND | V_EMPTY_OK | V_NOFIND_ERR);
-                CHECK_STRUCT_MEMBER_ARRAY();  // Struct member arrays not supported here
+                CHECK_STRUCT_MEMBER_ARRAY(); // Struct member arrays not supported here
                 if (((g_vartbl[g_VarIndex].type & T_INT) && g_vartbl[g_VarIndex].dims[0] > 0 && g_vartbl[g_VarIndex].dims[1] == 0))
                 { // integer array
                         if ((((long long int *)dd - g_vartbl[g_VarIndex].val.ia) + nbr) > (g_vartbl[g_VarIndex].dims[0] + 1 - g_OptionBase))
@@ -3032,7 +3025,7 @@ void cmd_web(void)
                 if (*tp)
                 {
                         ptr1 = findvar(tp, V_FIND | V_EMPTY_OK);
-                        CHECK_STRUCT_MEMBER_ARRAY();  // Struct member arrays not supported here
+                        CHECK_STRUCT_MEMBER_ARRAY(); // Struct member arrays not supported here
                         if (g_vartbl[g_VarIndex].type & T_INT)
                         {
                                 if (g_vartbl[g_VarIndex].dims[1] != 0)
@@ -3113,7 +3106,7 @@ void fun_json(void)
         getcsargs(&ep, 3);
         char *a = GetTempStrMemory();
         ptr1 = findvar(argv[0], V_FIND | V_EMPTY_OK);
-        CHECK_STRUCT_MEMBER_ARRAY();  // Struct member arrays not supported here
+        CHECK_STRUCT_MEMBER_ARRAY(); // Struct member arrays not supported here
         if (g_vartbl[g_VarIndex].type & T_INT)
         {
                 if (g_vartbl[g_VarIndex].dims[1] != 0)

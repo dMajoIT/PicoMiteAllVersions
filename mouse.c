@@ -440,21 +440,8 @@ void cmd_mouse(void)
       SyntaxError();
     ;
     getint(argv[0], 2, 2);
-    char code;
-    if (!(code = codecheck(argv[2])))
-      argv[2] += 2;
-    int pin1 = getinteger(argv[2]);
-    if (!code)
-      pin1 = codemap(pin1);
-    if (!(code = codecheck(argv[4])))
-      argv[4] += 2;
-    int pin2 = getinteger(argv[4]);
-    if (!code)
-      pin2 = codemap(pin2);
-    if (IsInvalidPin(pin1))
-      error("Invalid pin %/|", pin1, pin1);
-    if (IsInvalidPin(pin2))
-      error("Invalid pin %/|", pin2, pin2);
+    int pin1 = getpinarg(argv[2]);
+    int pin2 = getpinarg(argv[4]);
     if (!(pin1 == Option.MOUSE_CLOCK && pin2 == Option.MOUSE_DATA))
     {
       if (ExtCurrentConfig[pin1] >= EXT_COM_RESERVED)

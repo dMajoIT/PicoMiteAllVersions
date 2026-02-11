@@ -185,4 +185,6 @@ void turtle_rectangle(TurtleState *t, float width, float height);
 // Pattern-capable drawing functions (internal)
 void DrawCircleFilled_Pattern(int cx, int cy, int radius, int color, int pattern);
 void DrawRectangleFilled_Pattern(int x, int y, int width, int height, int color, int pattern);
+// Fill pattern data (8x8, 1-bit per pixel, NUM_PATTERNS entries)
+extern const uint8_t fill_patterns[][8];
 #endif // TURTLE_H

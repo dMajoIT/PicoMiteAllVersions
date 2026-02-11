@@ -233,6 +233,12 @@ void cmd_locate(void);
 void cmd_stepper(void);
 void cmd_bitstream(void);
 
+#ifdef rp2350
+void cmd_ray(void);
+void fun_ray(void);
+void ray_close(void);
+#endif
+
 #ifdef PICOMITEWEB
 void cmd_web(void);
 #endif
@@ -629,6 +635,9 @@ void fun_linputstr(void);
 	{(unsigned char *)"Astro", T_CMD, 0, cmd_star},
 	{(unsigned char *)"Location", T_CMD, 0, cmd_locate},
 	{(unsigned char *)"Stepper", T_CMD, 0, cmd_stepper},
+#ifndef PICOMITEWEB
+	{(unsigned char *)"Ray", T_CMD, 0, cmd_ray},
+#endif
 #endif
 #ifdef STRUCTENABLED
 	{(unsigned char *)"Type", T_CMD, 0, cmd_type},
@@ -793,6 +802,11 @@ void fun_linputstr(void);
 	{(unsigned char *)"LInput(", T_FUN | T_INT, 0, fun_linputstr},
 #ifdef STRUCTENABLED
 	{(unsigned char *)"Struct(", T_FUN | T_INT, 0, fun_struct},
+#endif
+#ifdef rp2350
+#ifndef PICOMITEWEB
+	{(unsigned char *)"Ray(", T_FUN | T_INT | T_NBR, 0, fun_ray},
+#endif
 #endif
 {
 	(unsigned char *)"", 0, 0, cmd_null

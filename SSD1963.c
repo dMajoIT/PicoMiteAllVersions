@@ -188,14 +188,7 @@ void MIPS16 ConfigDisplaySSD(unsigned char *p)
     Option.SSD_DATA = 1;
     if (argc == 13)
     { // only valid on rp2350b
-        char code;
-        if (!(code = codecheck(argv[12])))
-            argv[12] += 2;
-        int pin = getinteger(argv[12]);
-        if (!code)
-            pin = codemap(pin);
-        if (IsInvalidPin(pin))
-            StandardError(9);
+        int pin = getpinarg(argv[12]);
         Option.SSD_DATA = pin;
     }
     if (argc >= 11 && *argv[10])
@@ -239,14 +232,7 @@ void MIPS16 ConfigDisplaySSD(unsigned char *p)
 
     if (argc > 3 && *argv[4])
     {
-        char code;
-        if (!(code = codecheck(argv[4])))
-            argv[4] += 2;
-        int pin = getinteger(argv[4]);
-        if (!code)
-            pin = codemap(pin);
-        if (IsInvalidPin(pin))
-            StandardError(9);
+        int pin = getpinarg(argv[4]);
         if (ExtCurrentConfig[pin] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin, pin);
         if ((PinDef[pin].slice & 0x7f) == Option.AUDIO_SLICE)
@@ -257,14 +243,7 @@ void MIPS16 ConfigDisplaySSD(unsigned char *p)
         Option.DISPLAY_BL = 0;
     if (argc >= 7 && *argv[6])
     {
-        char code;
-        if (!(code = codecheck(argv[6])))
-            argv[6] += 2;
-        int pin = getinteger(argv[6]);
-        if (!code)
-            pin = codemap(pin);
-        if (IsInvalidPin(pin))
-            StandardError(9);
+        int pin = getpinarg(argv[6]);
         if (ExtCurrentConfig[pin] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin, pin);
         Option.SSD_DC = PinDef[pin].GPno;

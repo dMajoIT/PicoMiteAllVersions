@@ -279,6 +279,60 @@ int codecheck(unsigned char *line)
         return 4;
     return 0;
 }
+// Last pin value computed by getpinarg, stored before validation.
+// Used by mm.info(PIN) to retrieve the raw pin number even if IsInvalidPin fires.
+int g_pinarg_result = 0;
+
+// Parse a pin argument that may use GPnn or physical pin notation.
+// Accepts a pointer to the argument text; returns the physical pin number.
+// Supports: literal GPn/GPnn, numeric literals, numeric variables/expressions,
+// string literals like "gp1", string variables, and functions returning strings or numbers.
+// Validates the result with IsInvalidPin() and throws StandardError(9) if invalid.
+int getpinarg(unsigned char *arg)
+{
+    int pin = 0;
+    g_pinarg_result = 0;
+    skipspace(arg);
+    // First check for unquoted literal GPn/GPnn (the outlier case that
+    // evaluate cannot handle since GPn is not a valid expression)
+    if (codecheck(arg) == 0)
+    {
+        pin = codemap(getinteger(arg + 2));
+    }
+    else
+    {
+        // Use evaluate with T_NOTYPE to handle all other cases
+        MMFLOAT f;
+        long long int i64;
+        unsigned char *s;
+        int t = T_NOTYPE;
+        evaluate(arg, &f, &i64, &s, &t, false);
+        if (t & T_INT)
+            pin = (int)i64;
+        else if (t & T_NBR)
+            pin = (int)FloatToInt64(f);
+        else if (t & T_STR)
+        {
+            // String result - extract C string and check for GPnn format
+            int len = *s;
+            if (len < 3 || len > MAXVARLEN)
+                error("Invalid pin string");
+            unsigned char temp[MAXVARLEN + 1];
+            memcpy(temp, s + 1, len);
+            temp[len] = 0;
+            if (codecheck(temp) == 0)
+                pin = codemap(atoi((char *)&temp[2]));
+            else
+                error("Invalid pin string");
+        }
+        else
+            error("Syntax");
+    }
+    g_pinarg_result = pin;
+    if (IsInvalidPin(pin))
+        StandardError(9);
+    return pin;
+}
 #ifdef rp2350
 void __not_in_flash_func(on_pwm_wrap_1)(void)
 {
@@ -482,14 +536,7 @@ void __not_in_flash_func(cmd_sync)(void)
 void cmd_pin(void)
 {
     int pin, value;
-    unsigned char code;
-    if (!(code = codecheck(cmdline)))
-        cmdline += 2;
-    pin = getinteger(cmdline);
-    if (!code)
-        pin = codemap(pin);
-    if (IsInvalidPin(pin))
-        StandardError(9);
+    pin = getpinarg(cmdline);
     while (*cmdline && tokenfunction(*cmdline) != op_equal)
         cmdline++;
     if (!*cmdline)
@@ -1410,12 +1457,7 @@ void MIPS16 cmd_setpin(void)
     getcsargs(&cmdline, 7);
     if (argc % 2 == 0 || argc < 3)
         StandardError(2);
-    char code;
-    if (!(code = codecheck(argv[0])))
-        argv[0] += 2;
-    pin = getinteger(argv[0]);
-    if (!code)
-        pin = codemap(pin);
+    pin = getpinarg(argv[0]);
 
     if (checkstring(argv[2], (unsigned char *)"OFF") || checkstring(argv[2], (unsigned char *)"0"))
         value = EXT_NOT_CONFIG;
@@ -1582,11 +1624,7 @@ void MIPS16 cmd_setpin(void)
     ;
     if (checkstring(argv[4], (unsigned char *)"COM1"))
     {
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
+        pin2 = getpinarg(argv[2]);
         if (PinDef[pin].mode & UART0TX)
             value = EXT_UART0TX;
         else if (PinDef[pin].mode & UART0RX)
@@ -1604,11 +1642,7 @@ void MIPS16 cmd_setpin(void)
     }
     else if (checkstring(argv[4], (unsigned char *)"COM2"))
     {
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
+        pin2 = getpinarg(argv[2]);
         if (PinDef[pin].mode & UART1TX)
             value = EXT_UART1TX;
         else if (PinDef[pin].mode & UART1RX)
@@ -1626,11 +1660,7 @@ void MIPS16 cmd_setpin(void)
     }
     else if (checkstring(argv[4], (unsigned char *)"I2C"))
     {
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
+        pin2 = getpinarg(argv[2]);
         if (PinDef[pin].mode & I2C0SCL)
             value = EXT_I2C0SCL;
         else if (PinDef[pin].mode & I2C0SDA)
@@ -1648,11 +1678,7 @@ void MIPS16 cmd_setpin(void)
     }
     else if (checkstring(argv[4], (unsigned char *)"I2C2"))
     {
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
+        pin2 = getpinarg(argv[2]);
         if (PinDef[pin].mode & I2C1SCL)
             value = EXT_I2C1SCL;
         else if (PinDef[pin].mode & I2C1SDA)
@@ -1675,16 +1701,8 @@ void MIPS16 cmd_setpin(void)
     ;
     if (checkstring(argv[6], (unsigned char *)"SPI"))
     {
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
-        if (!(code = codecheck(argv[4])))
-            argv[4] += 2;
-        pin3 = getinteger(argv[4]);
-        if (!code)
-            pin3 = codemap(pin3);
+        pin2 = getpinarg(argv[2]);
+        pin3 = getpinarg(argv[4]);
         if (PinDef[pin].mode & SPI0RX)
             value = EXT_SPI0RX;
         else if (PinDef[pin].mode & SPI0TX)
@@ -1714,16 +1732,8 @@ void MIPS16 cmd_setpin(void)
     }
     else if (checkstring(argv[6], (unsigned char *)"SPI2"))
     {
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
-        if (!(code = codecheck(argv[4])))
-            argv[4] += 2;
-        pin3 = getinteger(argv[4]);
-        if (!code)
-            pin3 = codemap(pin3);
+        pin2 = getpinarg(argv[2]);
+        pin3 = getpinarg(argv[4]);
         if (PinDef[pin].mode & SPI1RX)
             value = EXT_SPI1RX;
         else if (PinDef[pin].mode & SPI1TX)
@@ -1944,7 +1954,6 @@ bool __no_inline_not_in_flash_func(bb_get_bootsel_button)()
 
 void fun_pin(void)
 {
-    char code;
     int pin, i, j, b[ANA_AVERAGE];
     MMFLOAT t;
     if (checkstring(ep, (unsigned char *)"TEMP"))
@@ -1971,13 +1980,7 @@ void fun_pin(void)
         return;
     }
 
-    if (!(code = codecheck(ep)))
-        ep += 2;
-    pin = getinteger(ep);
-    if (!code)
-        pin = codemap(pin);
-    if (IsInvalidPin(pin))
-        StandardError(9);
+    pin = getpinarg(ep);
     switch (ExtCurrentConfig[pin])
     {
     case EXT_DIG_IN:
@@ -2169,24 +2172,13 @@ void fun_distance(void)
     getcsargs(&ep, 3);
     if ((argc & 1) != 1)
         SyntaxError();
-    char code;
-    if (!(code = codecheck(argv[0])))
-        argv[0] += 2;
-    trig = getinteger(argv[0]);
-    if (!code)
-        trig = codemap(trig);
+    trig = getpinarg(argv[0]);
     if (argc == 3)
     {
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        echo = getinteger(argv[2]);
-        if (!code)
-            echo = codemap(echo);
+        echo = getpinarg(argv[2]);
     }
     else
         echo = trig; // they are the same if it is a 3-pin device
-    if (IsInvalidPin(trig) || IsInvalidPin(echo))
-        error("Invalid pin |", echo);
     if (ExtCurrentConfig[trig] >= EXT_COM_RESERVED || ExtCurrentConfig[echo] >= EXT_COM_RESERVED)
         StandardErrorParam2(27, trig, trig);
     ExtCfg(echo, EXT_DIG_IN, CNPUSET); // setup the echo input
@@ -2278,12 +2270,7 @@ void cmd_pulse(void)
     getcsargs(&cmdline, 3);
     if (argc != 3)
         SyntaxError();
-    char code;
-    if (!(code = codecheck(argv[0])))
-        argv[0] += 2;
-    pin = getinteger(argv[0]);
-    if (!code)
-        pin = codemap(pin);
+    pin = getpinarg(argv[0]);
     if (!(ExtCurrentConfig[pin] == EXT_DIG_OUT))
         error("Pin %/| is not an output", pin, pin);
 
@@ -2338,14 +2325,7 @@ void fun_pulsin(void)
     getcsargs(&ep, 7);
     if ((argc & 1) != 1 || argc < 3)
         SyntaxError();
-    char code;
-    if (!(code = codecheck(argv[0])))
-        argv[0] += 2;
-    pin = getinteger(argv[0]);
-    if (!code)
-        pin = codemap(pin);
-    if (IsInvalidPin(pin))
-        StandardError(9);
+    pin = getpinarg(argv[0]);
     if (ExtCurrentConfig[pin] != EXT_DIG_IN)
         error("Pin %/| is not an input", pin, pin);
     polarity = getinteger(argv[2]);
@@ -2410,14 +2390,7 @@ void cmd_ir(void)
     else if ((p = checkstring(cmdline, (unsigned char *)"SEND")))
     {
         getcsargs(&p, 5);
-        char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin = getinteger(argv[0]);
-        if (!code)
-            pin = codemap(pin);
-        if (IsInvalidPin(pin))
-            StandardError(9);
+        pin = getpinarg(argv[0]);
         dev = getint(argv[2], 0, 0b11111);
         cmd = getint(argv[4], 0, 0b1111111);
         if (ExtCurrentConfig[pin] >= EXT_COM_RESERVED)
@@ -3584,7 +3557,7 @@ void KeypadClose(void);
 
 void cmd_keypad(void)
 {
-    int i, j, code;
+    int i, j;
 
     if (checkstring(cmdline, (unsigned char *)"CLOSE"))
         KeypadClose();
@@ -3625,12 +3598,7 @@ void cmd_keypad(void)
                 keypadcols = keypadrows = 0;
                 error("Integer variable required");
             }
-            code = 0;
-            if (!(code = codecheck(argv[6])))
-                argv[6] += 2;
-            j = getinteger(argv[6]);
-            if (!code)
-                j = codemap(j);
+            j = getpinarg(argv[6]);
             int k = PinDef[j].GPno;
             for (i = 0; i < keypadrows; i++)
             {
@@ -3641,12 +3609,7 @@ void cmd_keypad(void)
                 ExtCfg(j, EXT_COM_RESERVED, 0);
                 keypad_pins[i] = j;
             }
-            code = 0;
-            if (!(code = codecheck(argv[10])))
-                argv[10] += 2;
-            j = getinteger(argv[10]);
-            if (!code)
-                j = codemap(j);
+            j = getpinarg(argv[10]);
             k = PinDef[j].GPno;
             for (i = 0; i < keypadcols; i++)
             {
@@ -3684,12 +3647,7 @@ void cmd_keypad(void)
                     keypad_pins[i] = 0;
                     break;
                 }
-                code = 0;
-                if (!(code = codecheck(argv[(i + 2) * 2])))
-                    argv[(i + 2) * 2] += 2;
-                j = getinteger(argv[(i + 2) * 2]);
-                if (!code)
-                    j = codemap(j);
+                j = getpinarg(argv[(i + 2) * 2]);
                 if (ExtCurrentConfig[j] >= EXT_COM_RESERVED)
                     StandardErrorParam2(27, j, j);
                 //            if(i < 4) {
@@ -3935,7 +3893,7 @@ static char lcd_pins[6];
 void cmd_lcd(void)
 {
     unsigned char *p;
-    int i, j, code;
+    int i, j;
 
     if ((p = checkstring(cmdline, (unsigned char *)"INIT")))
     {
@@ -3946,12 +3904,7 @@ void cmd_lcd(void)
             StandardError(31);
         for (i = 0; i < 6; i++)
         {
-            code = 0;
-            if (!(code = codecheck(argv[i * 2])))
-                argv[i * 2] += 2;
-            lcd_pins[i] = getinteger(argv[i * 2]);
-            if (!code)
-                lcd_pins[i] = codemap(lcd_pins[i]);
+            lcd_pins[i] = getpinarg(argv[i * 2]);
             if (ExtCurrentConfig[(int)lcd_pins[i]] >= EXT_COM_RESERVED)
                 StandardErrorParam2(27, lcd_pins[i], lcd_pins[i]);
             ExtCfg(lcd_pins[i], EXT_DIG_OUT, 0);
@@ -4419,14 +4372,7 @@ void cmd_DHT22(void)
 
     // get the pin number and set it up
     // get the pin number and set it up
-    char code;
-    if (!(code = codecheck(argv[0])))
-        argv[0] += 2;
-    pin = getinteger(argv[0]);
-    if (!code)
-        pin = codemap(pin);
-    if (IsInvalidPin(pin))
-        error("Invalid pin ");
+    pin = getpinarg(argv[0]);
     if (ExtCurrentConfig[pin] != EXT_NOT_CONFIG)
         StandardErrorParam2(27, pin, pin);
     if (argc == 7)
@@ -4808,14 +4754,7 @@ void cmd_WS2812(void)
         colour = getinteger(argv[6]);
         dest = (long long int *)&colour;
     }
-    unsigned char code;
-    if (!(code = codecheck(argv[2])))
-        argv[2] += 2;
-    pin = getinteger(argv[2]);
-    if (!code)
-        pin = codemap(pin);
-    if (IsInvalidPin(pin))
-        StandardError(9);
+    pin = getpinarg(argv[2]);
     int gppin = PinDef[pin].GPno;
     if (!(ExtCurrentConfig[pin] == EXT_DIG_OUT || ExtCurrentConfig[pin] == EXT_NOT_CONFIG))
         StandardErrorParam2(43, pin, pin);
@@ -5205,14 +5144,7 @@ void cmd_bitstream(void)
         // 4 params (argc==7): BITSTREAM pin, count, array(), mode
         int mode = 0;
         num = getint(argv[2], 1, 10000);
-        unsigned char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin = getinteger(argv[0]);
-        if (!code)
-            pin = codemap(pin);
-        if (IsInvalidPin(pin))
-            StandardError(9);
+        pin = getpinarg(argv[0]);
         int gpno = PinDef[pin].GPno;
         uint64_t gppin = ((uint64_t)1 << gpno);
         if (!(ExtCurrentConfig[pin] == EXT_DIG_OUT || ExtCurrentConfig[pin] == EXT_NOT_CONFIG))
@@ -5280,16 +5212,9 @@ void cmd_bitstream(void)
         MMFLOAT *a1float1 = NULL, *a1float2 = NULL;
         int64_t *a1int1 = NULL, *a1int2 = NULL;
         unsigned int *data1, *data2;
-        unsigned char code1, code2;
 
         // Parse pin1
-        if (!(code1 = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code1)
-            pin1 = codemap(pin1);
-        if (IsInvalidPin(pin1))
-            StandardError(9);
+        pin1 = getpinarg(argv[0]);
 
         // Parse count1
         num1 = getint(argv[2], 1, 10000);
@@ -5301,13 +5226,7 @@ void cmd_bitstream(void)
             mode1 = getint(argv[6], 0, 1);
 
         // Parse pin2
-        if (!(code2 = codecheck(argv[8])))
-            argv[8] += 2;
-        pin2 = getinteger(argv[8]);
-        if (!code2)
-            pin2 = codemap(pin2);
-        if (IsInvalidPin(pin2))
-            StandardError(9);
+        pin2 = getpinarg(argv[8]);
 
         // Parse count2
         num2 = getint(argv[10], 1, 10000);
@@ -5509,14 +5428,7 @@ void cmd_device(void)
         getcsargs(&tp, 13);
         if (argc < 9)
             StandardError(2);
-        unsigned char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        int pin = getinteger(argv[0]);
-        if (!code)
-            pin = codemap(pin);
-        if (IsInvalidPin(pin))
-            StandardError(9);
+        int pin = getpinarg(argv[0]);
         if (!(ExtCurrentConfig[pin] == EXT_DIG_IN || ExtCurrentConfig[pin] == EXT_NOT_CONFIG))
             error("Pin %/| is not off or an input", pin, pin);
         if (ExtCurrentConfig[pin] == EXT_NOT_CONFIG)
@@ -5556,15 +5468,8 @@ void cmd_device(void)
         getcsargs(&tp, 5);
         if (!(argc == 5))
             StandardError(2);
-        unsigned char code;
         //        int count = 0;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        int pin = getinteger(argv[0]);
-        if (!code)
-            pin = codemap(pin);
-        if (IsInvalidPin(pin))
-            StandardError(9);
+        int pin = getpinarg(argv[0]);
         uint64_t gppin = ((uint64_t)1 << PinDef[pin].GPno);
         int baudrate = getint(argv[2], 110, 230400);
         unsigned char *string = getstring(argv[4]);

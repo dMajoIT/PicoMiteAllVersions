@@ -4633,17 +4633,10 @@ void MIPS16 cmd_option(void)
             return;
         }
         int pin1;
-        unsigned char code;
         getcsargs(&tp, 1);
         if (CurrentLinePtr)
             StandardError(10);
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code)
-            pin1 = codemap(pin1);
-        if (IsInvalidPin(pin1))
-            StandardError(9);
+        pin1 = getpinarg(argv[0]);
         if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
             error("Pin | is in use", pin1);
         if (!(pin1 == 1 || pin1 == 11 || pin1 == 25 || pin1 == 62))
@@ -4700,7 +4693,6 @@ void MIPS16 cmd_option(void)
     if (tp)
     {
         int pin1, pin2;
-        unsigned char code;
         getcsargs(&tp, 3);
         if (CurrentLinePtr)
             StandardError(10);
@@ -4709,22 +4701,10 @@ void MIPS16 cmd_option(void)
         if (argc != 3)
             SyntaxError();
         ;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code)
-            pin1 = codemap(pin1);
-        if (IsInvalidPin(pin1))
-            StandardError(9);
+        pin1 = getpinarg(argv[0]);
         if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin1, pin1);
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
-        if (IsInvalidPin(pin2))
-            StandardError(9);
+        pin2 = getpinarg(argv[2]);
         if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin2, pin2);
         Option.KEYBOARD_CLOCK = pin1;
@@ -4746,29 +4726,16 @@ void MIPS16 cmd_option(void)
         else
         {
             int pin1, pin2;
-            unsigned char code;
             getcsargs(&tp, 3);
             if (Option.MOUSE_CLOCK)
                 error("Mouse must be disabled to change pins");
             if (argc != 3)
                 SyntaxError();
             ;
-            if (!(code = codecheck(argv[0])))
-                argv[0] += 2;
-            pin1 = getinteger(argv[0]);
-            if (!code)
-                pin1 = codemap(pin1);
-            if (IsInvalidPin(pin1))
-                StandardError(9);
+            pin1 = getpinarg(argv[0]);
             if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin1, pin1);
-            if (!(code = codecheck(argv[2])))
-                argv[2] += 2;
-            pin2 = getinteger(argv[2]);
-            if (!code)
-                pin2 = codemap(pin2);
-            if (IsInvalidPin(pin2))
-                StandardError(9);
+            pin2 = getpinarg(argv[2]);
             if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin2, pin2);
             Option.MOUSE_CLOCK = pin1;
@@ -4925,17 +4892,8 @@ void MIPS16 cmd_option(void)
             if (!(argc == 3 || argc == 5))
                 SyntaxError();
             ;
-            char code;
-            if (!(code = codecheck(argv[0])))
-                argv[0] += 2;
-            pin = getinteger(argv[0]);
-            if (!code)
-                pin = codemap(pin);
-            if (!(code = codecheck(argv[2])))
-                argv[2] += 2;
-            pin2 = getinteger(argv[2]);
-            if (!code)
-                pin2 = codemap(pin2);
+            pin = getpinarg(argv[0]);
+            pin2 = getpinarg(argv[2]);
             if (ExtCurrentConfig[pin] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin, pin);
             if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
@@ -5015,17 +4973,8 @@ void MIPS16 cmd_option(void)
             }
             else
                 Option.GPSBaud = 9600;
-            char code;
-            if (!(code = codecheck(argv[0])))
-                argv[0] += 2;
-            pin = getinteger(argv[0]);
-            if (!code)
-                pin = codemap(pin);
-            if (!(code = codecheck(argv[2])))
-                argv[2] += 2;
-            pin2 = getinteger(argv[2]);
-            if (!code)
-                pin2 = codemap(pin2);
+            pin = getpinarg(argv[0]);
+            pin2 = getpinarg(argv[2]);
             if (ExtCurrentConfig[pin] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin, pin);
             if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
@@ -5316,14 +5265,8 @@ void MIPS16 cmd_option(void)
                 getcsargs(&p, 1);
                 if (argc)
                 {
-                    unsigned char code, pin1;
-                    if (!(code = codecheck(p)))
-                        p += 2;
-                    pin1 = getinteger(p);
-                    if (!code)
-                        pin1 = codemap(pin1);
-                    if (IsInvalidPin(pin1))
-                        StandardError(9);
+                    unsigned char pin1;
+                    pin1 = getpinarg(p);
                     if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
                         StandardErrorParam2(27, pin1, pin1);
                     Option.NoHeartbeat = 0;
@@ -5699,17 +5642,8 @@ void MIPS16 cmd_option(void)
         getcsargs(&tp, 3);
         if (CurrentLinePtr)
             StandardError(10);
-        char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code)
-            pin1 = codemap(pin1);
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
+        pin1 = getpinarg(argv[0]);
+        pin2 = getpinarg(argv[2]);
         // now de-allocate the existing VGA pins temporarily
         ExtCurrentConfig[Option.VGA_BLUE] = EXT_NOT_CONFIG;
         ExtCurrentConfig[Option.VGA_HSYNC] = EXT_NOT_CONFIG;
@@ -6235,75 +6169,32 @@ void MIPS16 cmd_option(void)
             ;
             if (Option.AUDIO_CLK_PIN || Option.AUDIO_L)
                 error("Audio already configured");
-            unsigned char code;
             //
-            if (!(code = codecheck(argv[0])))
-                argv[0] += 2;
-            pin1 = getinteger(argv[0]);
-            if (!code)
-                pin1 = codemap(pin1);
-            if (IsInvalidPin(pin1))
-                StandardError(9);
+            pin1 = getpinarg(argv[0]);
             if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin1, pin1);
             //
-            if (!(code = codecheck(argv[2])))
-                argv[2] += 2;
-            pin2 = getinteger(argv[2]);
-            if (!code)
-                pin2 = codemap(pin2);
-            if (IsInvalidPin(pin2))
-                StandardError(9);
+            pin2 = getpinarg(argv[2]);
             if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin2, pin2);
             //
-            if (!(code = codecheck(argv[4])))
-                argv[4] += 2;
-            pin3 = getinteger(argv[4]);
-            if (!code)
-                pin3 = codemap(pin3);
-            if (IsInvalidPin(pin3))
-                StandardError(9);
+            pin3 = getpinarg(argv[4]);
             if (ExtCurrentConfig[pin3] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin3, pin3);
             //
-            if (!(code = codecheck(argv[6])))
-                argv[6] += 2;
-            pin4 = getinteger(argv[6]);
-            if (!code)
-                pin4 = codemap(pin4);
-            if (IsInvalidPin(pin4))
-                StandardError(9);
+            pin4 = getpinarg(argv[6]);
             if (ExtCurrentConfig[pin4] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin4, pin4);
             //
-            if (!(code = codecheck(argv[8])))
-                argv[8] += 2;
-            pin5 = getinteger(argv[8]);
-            if (!code)
-                pin5 = codemap(pin5);
-            if (IsInvalidPin(pin5))
-                StandardError(9);
+            pin5 = getpinarg(argv[8]);
             if (ExtCurrentConfig[pin5] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin5, pin5);
             //
-            if (!(code = codecheck(argv[10])))
-                argv[10] += 2;
-            pin6 = getinteger(argv[10]);
-            if (!code)
-                pin6 = codemap(pin6);
-            if (IsInvalidPin(pin6))
-                StandardError(9);
+            pin6 = getpinarg(argv[10]);
             if (ExtCurrentConfig[pin6] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin6, pin6);
             //
-            if (!(code = codecheck(argv[12])))
-                argv[12] += 2;
-            pin7 = getinteger(argv[12]);
-            if (!code)
-                pin7 = codemap(pin7);
-            if (IsInvalidPin(pin7))
-                StandardError(9);
+            pin7 = getpinarg(argv[12]);
             if (ExtCurrentConfig[pin7] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin7, pin7);
             //
@@ -6338,35 +6229,16 @@ void MIPS16 cmd_option(void)
             ;
             if (Option.AUDIO_CLK_PIN || Option.AUDIO_L)
                 error("Audio already configured");
-            unsigned char code;
             //
-            if (!(code = codecheck(argv[0])))
-                argv[0] += 2;
-            pin1 = getinteger(argv[0]);
-            if (!code)
-                pin1 = codemap(pin1);
-            if (IsInvalidPin(pin1))
-                StandardError(9);
+            pin1 = getpinarg(argv[0]);
             if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin1, pin1);
             //
-            if (!(code = codecheck(argv[2])))
-                argv[2] += 2;
-            pin2 = getinteger(argv[2]);
-            if (!code)
-                pin2 = codemap(pin2);
-            if (IsInvalidPin(pin2))
-                StandardError(9);
+            pin2 = getpinarg(argv[2]);
             if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin2, pin2);
             //
-            if (!(code = codecheck(argv[4])))
-                argv[4] += 2;
-            pin3 = getinteger(argv[4]);
-            if (!code)
-                pin3 = codemap(pin3);
-            if (IsInvalidPin(pin3))
-                StandardError(9);
+            pin3 = getpinarg(argv[4]);
             if (ExtCurrentConfig[pin3] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin3, pin3);
             //
@@ -6398,15 +6270,8 @@ void MIPS16 cmd_option(void)
             ;
             if (Option.AUDIO_CLK_PIN || Option.AUDIO_L || Option.audio_i2s_bclk)
                 error("Audio already configured");
-            unsigned char code;
             //
-            if (!(code = codecheck(argv[0])))
-                argv[0] += 2;
-            pin1 = getinteger(argv[0]);
-            if (!code)
-                pin1 = codemap(pin1);
-            if (IsInvalidPin(pin1))
-                StandardError(9);
+            pin1 = getpinarg(argv[0]);
             if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin1, pin1);
             //
@@ -6416,13 +6281,7 @@ void MIPS16 cmd_option(void)
             if (ExtCurrentConfig[pin3] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin3, pin3);
             //
-            if (!(code = codecheck(argv[2])))
-                argv[2] += 2;
-            pin2 = getinteger(argv[2]);
-            if (!code)
-                pin2 = codemap(pin2);
-            if (IsInvalidPin(pin2))
-                StandardError(9);
+            pin2 = getpinarg(argv[2]);
             if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG || pin2 == pin1 || pin2 == pin3)
                 StandardErrorParam2(27, pin2, pin2);
 
@@ -6459,23 +6318,10 @@ void MIPS16 cmd_option(void)
         ;
         if (Option.AUDIO_CLK_PIN || Option.AUDIO_L)
             error("Audio already configured");
-        unsigned char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code)
-            pin1 = codemap(pin1);
-        if (IsInvalidPin(pin1))
-            StandardError(9);
+        pin1 = getpinarg(argv[0]);
         if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin1, pin1);
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
-        if (IsInvalidPin(pin2))
-            StandardError(9);
+        pin2 = getpinarg(argv[2]);
         if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin2, pin2);
         slice = checkslice(pin1, pin2, 0);
@@ -6517,23 +6363,10 @@ void MIPS16 cmd_option(void)
         ;
         if (Option.SYSTEM_I2C_SCL)
             error("I2C already configured");
-        unsigned char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code)
-            pin1 = codemap(pin1);
-        if (IsInvalidPin(pin1))
-            StandardError(9);
+        pin1 = getpinarg(argv[0]);
         if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin1, pin1);
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
-        if (IsInvalidPin(pin2))
-            StandardError(9);
+        pin2 = getpinarg(argv[2]);
         if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin2, pin2);
         if (PinDef[pin1].mode & I2C0SDA && PinDef[pin2].mode & I2C0SCL)
@@ -6595,41 +6428,16 @@ void MIPS16 cmd_option(void)
         if (argc != 7)
             SyntaxError();
         ;
-        unsigned char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code)
-            pin1 = codemap(pin1);
-        if (IsInvalidPin(pin1))
-            StandardError(9);
+        pin1 = getpinarg(argv[0]);
         if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin1, pin1);
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
-        if (IsInvalidPin(pin2))
-            StandardError(9);
+        pin2 = getpinarg(argv[2]);
         if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin2, pin2);
-        if (!(code = codecheck(argv[4])))
-            argv[4] += 2;
-        pin3 = getinteger(argv[4]);
-        if (!code)
-            pin3 = codemap(pin3);
-        if (IsInvalidPin(pin3))
-            StandardError(9);
+        pin3 = getpinarg(argv[4]);
         if (ExtCurrentConfig[pin3] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin3, pin3);
-        if (!(code = codecheck(argv[6])))
-            argv[6] += 2;
-        pin4 = getinteger(argv[6]);
-        if (!code)
-            pin4 = codemap(pin4);
-        if (IsInvalidPin(pin4))
-            StandardError(9);
+        pin4 = getpinarg(argv[6]);
         if (ExtCurrentConfig[pin4] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin4, pin4);
         if (pin1 == pin2 || pin1 == pin3 || pin1 == pin4 || pin2 == pin3 || pin2 == pin4 || pin3 == pin4)
@@ -6665,32 +6473,13 @@ void MIPS16 cmd_option(void)
         ;
         if (Option.SYSTEM_CLK)
             error("SYSTEM SPI already configured");
-        unsigned char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code)
-            pin1 = codemap(pin1);
-        if (IsInvalidPin(pin1))
-            StandardError(9);
+        pin1 = getpinarg(argv[0]);
         if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin1, pin1);
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
-        if (IsInvalidPin(pin2))
-            StandardError(9);
+        pin2 = getpinarg(argv[2]);
         if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin2, pin2);
-        if (!(code = codecheck(argv[4])))
-            argv[4] += 2;
-        pin3 = getinteger(argv[4]);
-        if (!code)
-            pin3 = codemap(pin3);
-        if (IsInvalidPin(pin3))
-            StandardError(9);
+        pin3 = getpinarg(argv[4]);
         if (ExtCurrentConfig[pin3] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin3, pin3);
         if (!(PinDef[pin1].mode & SPI0SCK && PinDef[pin2].mode & SPI0TX && PinDef[pin3].mode & SPI0RX) &&
@@ -6739,32 +6528,13 @@ void MIPS16 cmd_option(void)
         ;
         if (Option.LCD_CLK && !(Option.LCD_CLK == Option.SYSTEM_CLK))
             error("LCD SPI already configured");
-        unsigned char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin1 = getinteger(argv[0]);
-        if (!code)
-            pin1 = codemap(pin1);
-        if (IsInvalidPin(pin1))
-            StandardError(9);
+        pin1 = getpinarg(argv[0]);
         if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin1, pin1);
-        if (!(code = codecheck(argv[2])))
-            argv[2] += 2;
-        pin2 = getinteger(argv[2]);
-        if (!code)
-            pin2 = codemap(pin2);
-        if (IsInvalidPin(pin2))
-            StandardError(9);
+        pin2 = getpinarg(argv[2]);
         if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin2, pin2);
-        if (!(code = codecheck(argv[4])))
-            argv[4] += 2;
-        pin3 = getinteger(argv[4]);
-        if (!code)
-            pin3 = codemap(pin3);
-        if (IsInvalidPin(pin3))
-            StandardError(9);
+        pin3 = getpinarg(argv[4]);
         if (ExtCurrentConfig[pin3] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin3, pin3);
         if (!(PinDef[pin1].mode & SPI0SCK && PinDef[pin2].mode & SPI0TX && PinDef[pin3].mode & SPI0RX) &&
@@ -6826,14 +6596,7 @@ void MIPS16 cmd_option(void)
             error("SDcard already configured");
         if (argc == 1 && !Option.SYSTEM_CLK)
             StandardError(45);
-        unsigned char code;
-        if (!(code = codecheck(argv[0])))
-            argv[0] += 2;
-        pin4 = getinteger(argv[0]);
-        if (!code)
-            pin4 = codemap(pin4);
-        if (IsInvalidPin(pin4))
-            StandardError(9);
+        pin4 = getpinarg(argv[0]);
         if (ExtCurrentConfig[pin4] != EXT_NOT_CONFIG)
             StandardErrorParam2(27, pin4, pin4);
         Option.SD_CS = pin4;
@@ -6843,31 +6606,13 @@ void MIPS16 cmd_option(void)
         Option.SD_MISO_PIN = 0;
         if (argc > 1)
         {
-            if (!(code = codecheck(argv[2])))
-                argv[2] += 2;
-            pin1 = getinteger(argv[2]);
-            if (!code)
-                pin1 = codemap(pin1);
-            if (IsInvalidPin(pin1))
-                StandardError(9);
+            pin1 = getpinarg(argv[2]);
             if (ExtCurrentConfig[pin1] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin1, pin1);
-            if (!(code = codecheck(argv[4])))
-                argv[4] += 2;
-            pin2 = getinteger(argv[4]);
-            if (!code)
-                pin2 = codemap(pin2);
-            if (IsInvalidPin(pin2))
-                StandardError(9);
+            pin2 = getpinarg(argv[4]);
             if (ExtCurrentConfig[pin2] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin2, pin2);
-            if (!(code = codecheck(argv[6])))
-                argv[6] += 2;
-            pin3 = getinteger(argv[6]);
-            if (!code)
-                pin3 = codemap(pin3);
-            if (IsInvalidPin(pin3))
-                StandardError(9);
+            pin3 = getpinarg(argv[6]);
             if (ExtCurrentConfig[pin3] != EXT_NOT_CONFIG)
                 StandardErrorParam2(27, pin3, pin3);
 #ifdef PICOMITEVGA
@@ -7873,12 +7618,24 @@ void MIPS16 fun_info(void)
         else if ((tp = checkstring(ep, (unsigned char *)"PIN")))
         {
             int pin;
-            char code;
-            if (!(code = codecheck(tp)))
-                tp += 2;
-            pin = getinteger(tp);
-            if (!code)
-                pin = codemap(pin);
+            {
+                // Wrap getpinarg in OptionErrorSkip so that invalid pins
+                // (e.g. HDMI-reserved, CYW43-reserved, or genuinely invalid)
+                // are caught here instead of aborting. The raw pin number is
+                // preserved in g_pinarg_result for subsequent range checks.
+                int saved = OptionErrorSkip;
+                OptionErrorSkip = 1;
+                if (setjmp(ErrNext) == 0)
+                {
+                    pin = getpinarg(tp);
+                }
+                else
+                {
+                    pin = g_pinarg_result; // retrieve the raw pin before validation failed
+                    MMerrno = 0;           // clear the error since we handled it
+                }
+                OptionErrorSkip = saved;
+            }
 #ifdef HDMI
             if (pin >= 16 && pin <= 25)
             {
@@ -7898,18 +7655,22 @@ void MIPS16 fun_info(void)
             }
 #endif
             if (IsInvalidPin(pin))
-                strcpy((char *)sret, "Invalid");
-            else
-                strcpy((char *)sret, PinFunction[ExtCurrentConfig[pin] & 0xFF]);
-            if (ExtCurrentConfig[pin] & EXT_BOOT_RESERVED)
             {
-                strcpy((char *)sret, "Boot Reserved : ");
-                strcat((char *)sret, pinsearch(pin));
+                strcpy((char *)sret, "Invalid");
             }
-            if (ExtCurrentConfig[pin] & EXT_COM_RESERVED)
-                strcat((char *)sret, ": Reserved for function");
-            if (ExtCurrentConfig[pin] & EXT_DS18B20_RESERVED)
-                strcat((char *)sret, ": In use for DS18B20");
+            else
+            {
+                strcpy((char *)sret, PinFunction[ExtCurrentConfig[pin] & 0xFF]);
+                if (ExtCurrentConfig[pin] & EXT_BOOT_RESERVED)
+                {
+                    strcpy((char *)sret, "Boot Reserved : ");
+                    strcat((char *)sret, pinsearch(pin));
+                }
+                if (ExtCurrentConfig[pin] & EXT_COM_RESERVED)
+                    strcat((char *)sret, ": Reserved for function");
+                if (ExtCurrentConfig[pin] & EXT_DS18B20_RESERVED)
+                    strcat((char *)sret, ": In use for DS18B20");
+            }
             CtoM(sret);
             targ = T_STR;
             return;

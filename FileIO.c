@@ -3917,13 +3917,13 @@ void LoadPNG(unsigned char *p)
         upng_free(upng);
         error("Image too large");
     }
-    if (!(upng_get_format(upng) == 3))
-    {
-        upng_free(upng);
-        error("Invalid format, must be RGBA8888");
-    }
     routinechecks();
     upng_decode(upng);
+    if (!(upng_get_format(upng) == UPNG_RGBA8))
+    {
+        upng_free(upng);
+        error("Invalid format, must be RGBA8888 or indexed PNG");
+    }
     unsigned char *rr;
     routinechecks();
     rr = (unsigned char *)upng_get_buffer(upng);
@@ -4307,6 +4307,9 @@ void MIPS16 CloseAllFiles(void)
     closeallstobjects();
 #ifndef PICOMITEWEB
     closeall3d();
+#ifdef rp2350
+    ray_close();
+#endif
 #endif
     closeframebuffer('A');
     for (i = 1; i <= MAXOPENFILES; i++)

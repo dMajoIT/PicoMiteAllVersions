@@ -469,6 +469,8 @@ void setBacklight(int level, int frequency);
 void SoftReset(int code);
 int codemap(int pin);
 int codecheck(unsigned char *line);
+int getpinarg(unsigned char *arg);
+extern int g_pinarg_result;
 
 #endif /* EXTERNAL_HEADER */
 #endif /* !defined(INCLUDE_COMMAND_TABLE) && !defined(INCLUDE_TOKEN_TABLE) */

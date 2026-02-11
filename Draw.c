@@ -6715,7 +6715,7 @@ void cmd_sprite(void)
 #ifdef rp2350
     else if ((p = checkstring(cmdline, (unsigned char *)"LOADPNG")))
     {
-        int toggle = 0, transparent = 0, cutoff = 30;
+        int toggle = 0, transparent = 0, cutoff = 30, remap_colour = -1;
         int w, h;
         upng_t *upng;
         // get the command line arguments
@@ -6731,7 +6731,18 @@ void cmd_sprite(void)
             return;
         unsigned char *q = getFstring(argv[2]); // get the file name
         if (argc >= 5 && *argv[4])
-            transparent = getint(argv[4], 0, 15);
+        {
+            int targ = getint(argv[4], -15, 15);
+            if (targ < 0)
+            {
+                remap_colour = -targ; // RGB121 index to substitute for opaque black
+                transparent = 0;
+            }
+            else
+            {
+                transparent = targ;
+            }
+        }
         transparent = RGB121map[transparent];
         if (argc == 7)
             cutoff = getint(argv[6], 1, 254);
@@ -6759,13 +6770,13 @@ void cmd_sprite(void)
             upng_free(upng);
             error("Image too large");
         }
-        if (!(upng_get_format(upng) == 3))
-        {
-            upng_free(upng);
-            error("Invalid format, must be RGBA8888");
-        }
         routinechecks();
         upng_decode(upng);
+        if (!(upng_get_format(upng) == UPNG_RGBA8))
+        {
+            upng_free(upng);
+            error("Invalid format, must be RGBA8888 or indexed PNG");
+        }
         unsigned char *rr;
         routinechecks();
         rr = (unsigned char *)upng_get_buffer(upng);
@@ -6789,27 +6800,18 @@ void cmd_sprite(void)
                 pp[1] = (transparent & 0xFF00) >> 8;
                 pp[2] = (transparent & 0xFF);
             }
-            if (DISPLAY_TYPE == SCREENMODE1)
             {
-                if (toggle)
-                {
-                    *t |= (char)(((uint16_t)pp[2] + (uint16_t)pp[1] + (uint16_t)pp[0]) < 0x180 ? 0 : 0xF0);
-                }
+                uint8_t c4;
+                if (DISPLAY_TYPE == SCREENMODE1)
+                    c4 = (((uint16_t)pp[2] + (uint16_t)pp[1] + (uint16_t)pp[0]) < 0x180) ? 0 : 0xF;
                 else
-                {
-                    *t = (char)(((uint16_t)pp[2] + (uint16_t)pp[1] + (uint16_t)pp[0]) < 0x180 ? 0 : 0xF);
-                }
-            }
-            else
-            {
+                    c4 = ((pp[2] & 0x80) >> 4) | ((pp[1] & 0xC0) >> 5) | ((pp[0] & 0x80) >> 7);
+                if (remap_colour >= 0 && c4 == 0 && rr[3] > cutoff)
+                    c4 = (uint8_t)remap_colour;
                 if (toggle)
-                {
-                    *t |= ((pp[2] & 0x80)) | ((pp[1] & 0xC0) >> 1) | ((pp[0] & 0x80) >> 3);
-                }
+                    *t |= (c4 << 4);
                 else
-                {
-                    *t = ((pp[2] & 0x80) >> 4) | ((pp[1] & 0xC0) >> 5) | ((pp[0] & 0x80) >> 7);
-                }
+                    *t = c4;
             }
             if (toggle)
                 t++;

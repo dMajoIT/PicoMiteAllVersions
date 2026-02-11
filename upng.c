@@ -31,6 +31,8 @@ freely, subject to the following restrictions:
 #define CHUNK_IHDR MAKE_DWORD('I', 'H', 'D', 'R')
 #define CHUNK_IDAT MAKE_DWORD('I', 'D', 'A', 'T')
 #define CHUNK_IEND MAKE_DWORD('I', 'E', 'N', 'D')
+#define CHUNK_PLTE MAKE_DWORD('P', 'L', 'T', 'E')
+#define CHUNK_TRNS MAKE_DWORD('t', 'R', 'N', 'S')
 
 #define FIRST_LENGTH_CODE_INDEX 257
 #define LAST_LENGTH_CODE_INDEX 285
@@ -72,6 +74,7 @@ typedef enum upng_color
 {
 	UPNG_LUM = 0,
 	UPNG_RGB = 2,
+	UPNG_PLT = 3,
 	UPNG_LUMA = 4,
 	UPNG_RGBA = 6
 } upng_color;
@@ -100,6 +103,11 @@ struct upng_t
 
 	upng_state state;
 	upng_source source;
+
+	/* palette for indexed (color_type 3) PNGs */
+	unsigned char palette[256][4]; /* R, G, B, A per entry */
+	unsigned palette_entries;
+	unsigned trns_entries;
 };
 
 typedef struct huffman_tree
@@ -958,6 +966,17 @@ static upng_format determine_format(upng_t *upng)
 		default:
 			return UPNG_BADFORMAT;
 		}
+	case UPNG_PLT:
+		switch (upng->color_depth)
+		{
+		case 1:
+		case 2:
+		case 4:
+		case 8:
+			return UPNG_INDEXED8; /* all indexed depths handled; expanded to RGBA8 on decode */
+		default:
+			return UPNG_BADFORMAT;
+		}
 	case UPNG_RGB:
 		switch (upng->color_depth)
 		{
@@ -1162,6 +1181,40 @@ upng_error upng_decode(upng_t *upng)
 		{
 			compressed_size += length;
 		}
+		else if (upng_chunk_type(chunk) == CHUNK_PLTE)
+		{
+			/* palette chunk — read up to 256 RGB entries */
+			const unsigned char *data = chunk + 8;
+			unsigned ncolors = length / 3;
+			if (length % 3 != 0 || ncolors > 256)
+			{
+				SET_ERROR(upng, UPNG_EMALFORMED);
+				return upng->error;
+			}
+			upng->palette_entries = ncolors;
+			for (unsigned i = 0; i < ncolors; i++)
+			{
+				upng->palette[i][0] = data[i * 3 + 0]; /* R */
+				upng->palette[i][1] = data[i * 3 + 1]; /* G */
+				upng->palette[i][2] = data[i * 3 + 2]; /* B */
+				upng->palette[i][3] = 255;              /* A default opaque */
+			}
+		}
+		else if (upng_chunk_type(chunk) == CHUNK_TRNS)
+		{
+			/* transparency chunk — for indexed PNGs, one alpha byte per palette entry */
+			if (upng->color_type == UPNG_PLT)
+			{
+				const unsigned char *data = chunk + 8;
+				unsigned n = (length < upng->palette_entries) ? length : upng->palette_entries;
+				upng->trns_entries = n;
+				for (unsigned i = 0; i < n; i++)
+				{
+					upng->palette[i][3] = data[i];
+				}
+			}
+			/* for other color types, tRNS is silently ignored */
+		}
 		else if (upng_chunk_type(chunk) == CHUNK_IEND)
 		{
 			break;
@@ -1209,6 +1262,9 @@ upng_error upng_decode(upng_t *upng)
 		chunk += upng_chunk_length(chunk) + 12;
 	}
 
+	/* source buffer is no longer needed — free it before the large inflate allocation */
+	upng_free_source(upng);
+
 	routinechecks();
 
 	/* allocate space to store inflated (but still filtered) data */
@@ -1233,31 +1289,126 @@ upng_error upng_decode(upng_t *upng)
 	/* free the compressed compressed data */
 	FreeMemorySafe((void *)&compressed);
 
-	/* allocate final image buffer */
 	upng->size = (upng->height * upng->width * upng_get_bpp(upng) + 7) / 8;
-	upng->buffer = (unsigned char *)GetMemory(upng->size);
-	if (upng->buffer == NULL)
-	{
-		FreeMemorySafe((void *)&inflated);
-		upng->size = 0;
-		SET_ERROR(upng, UPNG_ENOMEM);
-		return upng->error;
-	}
-	routinechecks();
 
-	/* unfilter scanlines */
-	post_process_scanlines(upng, upng->buffer, inflated, upng);
-	FreeMemorySafe((void *)&inflated);
-
-	if (upng->error != UPNG_EOK)
+	/*
+	 * For bpp >= 8 (RGB8, RGBA8, etc.) we can unfilter in-place within the
+	 * inflated buffer. Each output row (linebytes) is shorter than the
+	 * corresponding input row (1 + linebytes) because the filter-type byte
+	 * is consumed, so writes never overrun reads. This avoids allocating a
+	 * second full-size image buffer, saving W*H*bytes_per_pixel of RAM.
+	 */
+	if (upng_get_bpp(upng) >= 8)
 	{
-		FreeMemorySafe((void *)&upng->buffer);
-		upng->buffer = NULL;
-		upng->size = 0;
+		unfilter(upng, inflated, inflated, upng->width, upng->height, upng_get_bpp(upng));
+		if (upng->error != UPNG_EOK)
+		{
+			FreeMemorySafe((void *)&inflated);
+			upng->size = 0;
+		}
+		else
+		{
+			/* take ownership of inflated buffer as the output buffer */
+			upng->buffer = inflated;
+			upng->state = UPNG_DECODED;
+		}
 	}
 	else
 	{
-		upng->state = UPNG_DECODED;
+		/* allocate separate output buffer (needed for sub-byte pixel sizes) */
+		upng->buffer = (unsigned char *)GetMemory(upng->size);
+		if (upng->buffer == NULL)
+		{
+			FreeMemorySafe((void *)&inflated);
+			upng->size = 0;
+			SET_ERROR(upng, UPNG_ENOMEM);
+			return upng->error;
+		}
+		routinechecks();
+
+		/* unfilter scanlines */
+		post_process_scanlines(upng, upng->buffer, inflated, upng);
+		FreeMemorySafe((void *)&inflated);
+
+		if (upng->error != UPNG_EOK)
+		{
+			FreeMemorySafe((void *)&upng->buffer);
+			upng->buffer = NULL;
+			upng->size = 0;
+		}
+		else
+		{
+			upng->state = UPNG_DECODED;
+		}
+	}
+
+	/*
+	 * For indexed (paletted) PNGs, expand palette indices to RGBA8888.
+	 * At this point upng->buffer contains one index per pixel (for 8-bit depth)
+	 * or packed indices (for 1/2/4-bit depth). We allocate a new RGBA buffer,
+	 * expand using the palette, then free the index buffer.
+	 */
+	if (upng->error == UPNG_EOK && upng->color_type == UPNG_PLT)
+	{
+		unsigned long npixels = (unsigned long)upng->width * upng->height;
+		unsigned long rgba_size = npixels * 4;
+		unsigned char *rgba = (unsigned char *)GetMemory(rgba_size);
+		if (rgba == NULL)
+		{
+			FreeMemorySafe((void *)&upng->buffer);
+			upng->buffer = NULL;
+			upng->size = 0;
+			SET_ERROR(upng, UPNG_ENOMEM);
+			upng_free_source(upng);
+			return upng->error;
+		}
+
+		unsigned char *src = upng->buffer;
+		unsigned char *dst = rgba;
+		unsigned depth = upng->color_depth;
+
+		if (depth == 8)
+		{
+			/* fast path: one byte per index */
+			for (unsigned long i = 0; i < npixels; i++)
+			{
+				unsigned idx = src[i];
+				if (idx >= upng->palette_entries) idx = 0;
+				dst[i * 4 + 0] = upng->palette[idx][0];
+				dst[i * 4 + 1] = upng->palette[idx][1];
+				dst[i * 4 + 2] = upng->palette[idx][2];
+				dst[i * 4 + 3] = upng->palette[idx][3];
+			}
+		}
+		else
+		{
+			/* sub-byte depths (1, 2, 4): indices packed MSB-first */
+			unsigned ppb = 8 / depth;          /* pixels per byte */
+			unsigned mask = (1 << depth) - 1;  /* index mask */
+			unsigned long pi = 0;              /* pixel index */
+			unsigned long nbytes = (npixels * depth + 7) / 8;
+			for (unsigned long bi = 0; bi < nbytes && pi < npixels; bi++)
+			{
+				unsigned char byte = src[bi];
+				for (unsigned j = 0; j < ppb && pi < npixels; j++, pi++)
+				{
+					unsigned shift = (ppb - 1 - j) * depth;
+					unsigned idx = (byte >> shift) & mask;
+					if (idx >= upng->palette_entries) idx = 0;
+					dst[pi * 4 + 0] = upng->palette[idx][0];
+					dst[pi * 4 + 1] = upng->palette[idx][1];
+					dst[pi * 4 + 2] = upng->palette[idx][2];
+					dst[pi * 4 + 3] = upng->palette[idx][3];
+				}
+			}
+		}
+
+		FreeMemorySafe((void *)&upng->buffer);
+		upng->buffer = rgba;
+		upng->size = rgba_size;
+		upng->format = UPNG_RGBA8;
+		upng->color_type = UPNG_RGBA;
+		upng->color_depth = 8;
 	}
 
 	/* we are done with our input buffer; free it if we own it */
@@ -1293,6 +1444,9 @@ static upng_t *upng_new(void)
 	upng->source.buffer = NULL;
 	upng->source.size = 0;
 	upng->source.owning = 0;
+
+	upng->palette_entries = 0;
+	upng->trns_entries = 0;
 
 	return upng;
 }
@@ -1402,6 +1556,8 @@ unsigned upng_get_components(const upng_t *upng)
 	switch (upng->color_type)
 	{
 	case UPNG_LUM:
+		return 1;
+	case UPNG_PLT:
 		return 1;
 	case UPNG_RGB:
 		return 3;
