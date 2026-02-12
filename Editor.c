@@ -2461,10 +2461,18 @@ void MarkMode(unsigned char *cb, unsigned char *buf)
 // search through the text in the editing buffer looking for a specific line
 // enters with ln = the line required
 // exits pointing to the start of the line or pointing to a zero char if not that many lines in the buffer
+// inmulti return values:
+//   0 = normal
+//   1 = inside /* */ multi-line comment
+//   2 = (internal) */ found at start of line
+//   3 = continuation line inside a quoted string
+//   4 = continuation line inside a single-line comment
 char *findLine(int ln, int *inmulti)
 {
     unsigned char *p, *q;
     *inmulti = false;
+    int inquote = false;
+    int incomment = false;
     p = q = EdBuff;
     skipspace(q);
     if (q[0] == '/' && q[1] == '*')
@@ -2475,6 +2483,18 @@ char *findLine(int ln, int *inmulti)
     {
         if (*p == '\n')
         {
+            // Check if this line continues to the next via continuation character
+            if (Option.continuation && p >= EdBuff + 2 &&
+                *(p - 1) == Option.continuation && *(p - 2) == ' ')
+            {
+                // Continuation line - carry quote/comment state to next line
+            }
+            else
+            {
+                // Not a continuation - reset quote/comment state
+                inquote = false;
+                incomment = false;
+            }
             if (*inmulti == 2)
                 *inmulti = false;
             ln--;
@@ -2485,8 +2505,21 @@ char *findLine(int ln, int *inmulti)
             if (q[0] == '*' && q[1] == '/')
                 *inmulti = 2;
         }
+        else if (!*inmulti)
+        {
+            // Track quote and comment state through the text
+            if (*p == '\'' && !inquote)
+                incomment = true;
+            else if (*p == '"' && !incomment)
+                inquote = !inquote;
+        }
         p++;
     }
+    // Report continuation colour state via inmulti
+    if (!*inmulti && inquote)
+        *inmulti = 3;
+    else if (!*inmulti && incomment)
+        *inmulti = 4;
     return (char *)p;
 }
 
@@ -2555,6 +2588,26 @@ void SetColour(unsigned char *p, int DoVT100)
             if (DoVT100)
                 PrintString(VT100_C_NORMAL);
         }
+        return;
+    }
+
+    // Special init for continuation line colour state
+    if (p == (unsigned char *)1)
+    {
+        // Init in quote mode (for continuation lines split inside a string)
+        inquote = true;
+        gui_fcolour = GUI_C_QUOTE;
+        if (DoVT100)
+            PrintString(VT100_C_QUOTE);
+        return;
+    }
+    if (p == (unsigned char *)2)
+    {
+        // Init in comment mode (for continuation lines split inside a comment)
+        incomment = true;
+        gui_fcolour = GUI_C_COMMENT;
+        if (DoVT100)
+            PrintString(VT100_C_COMMENT);
         return;
     }
 
@@ -2776,11 +2829,16 @@ void printLine(int ln)
     {
         MX470PutC('\r'); // print on the MX470 display
         p = findLine(ln, &inmulti);
+        // Init colour state for continuation lines split inside a string or comment
+        if (inmulti == 3)
+            SetColour((unsigned char *)1, false); // init quote state
+        else if (inmulti == 4)
+            SetColour((unsigned char *)2, false); // init comment state
         // i = VWidth - 1;   // I think this is wrong. Does not show last character in line G.A.
         i = VWidth;
         while (i && *p && *p != '\n')
         {
-            if (!inmulti)
+            if (!inmulti || inmulti == 3)
                 SetColour((unsigned char *)p, false); // set the colour for the LCD display only
             else
                 gui_fcolour = GUI_C_COMMENT;
@@ -2794,6 +2852,11 @@ void printLine(int ln)
     p = findLine(ln, &inmulti);
     if (Option.ColourCode)
     {
+        // Init colour state for continuation lines split inside a string or comment
+        if (inmulti == 3)
+            SetColour((unsigned char *)1, true); // init quote state
+        else if (inmulti == 4)
+            SetColour((unsigned char *)2, true); // init comment state
         // if we are colour coding we need to redraw the whole line
         SSputchar('\r', 0); // display the chars after the editing point
         // i = VWidth - 1;         // I think this is wrong. Does not show last character in line G.A.
@@ -2812,7 +2875,7 @@ void printLine(int ln)
     {
         if (Option.ColourCode)
         {
-            if (!inmulti)
+            if (!inmulti || inmulti == 3)
                 SetColour((unsigned char *)p, true); // if colour coding is used set the colour for the VT100 emulator
             else
             {

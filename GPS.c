@@ -575,19 +575,24 @@ void GPS_parse(char *nmea)
   struct tm *tm;
   struct tm tma;
   tm = &tma;
+  // strip trailing \r and \n from the NMEA sentence
+  int len = strlen(nmea);
+  while (len > 0 && (nmea[len - 1] == '\r' || nmea[len - 1] == '\n'))
+    nmea[--len] = 0;
+
   if (gpsmonitor)
   {
     MMPrintString(nmea);
+    MMPrintString("\r\n");
   }
   // do checksum check
-  // first look if we even have one
-  if (nmea[strlen(nmea) - 4] == '*')
+  // find the '*' that precedes the two-digit hex checksum
+  if (len >= 4 && nmea[len - 3] == '*')
   {
-    uint16_t sum = parseHex(nmea[strlen(nmea) - 3]) * 16;
-    sum += parseHex(nmea[strlen(nmea) - 2]);
-    uint8_t i;
-    // check checksum
-    for (i = 2; i < (strlen(nmea) - 4); i++)
+    uint16_t sum = parseHex(nmea[len - 2]) * 16;
+    sum += parseHex(nmea[len - 1]);
+    // XOR all characters between '$' (exclusive) and '*' (exclusive)
+    for (int i = 1; i < (len - 3); i++)
     {
       sum ^= nmea[i];
     }
@@ -599,8 +604,8 @@ void GPS_parse(char *nmea)
   }
   else
   {
-     //Missing Checksum, Abort!
-     return;
+    // Missing Checksum, Abort!
+    return;
   }
   char degreebuff[10];
   // look for a few common sentences
