@@ -205,7 +205,7 @@ extern "C"
 
 #include "lwipopts_examples_common.h"
 
-#define MagicKey 0x8456D8E6
+#define MagicKey 0x8721D8E6
 #define MaxPcb 8
 #define MAX_CPU 252000
 #define MIN_CPU 126000
@@ -229,23 +229,23 @@ extern "C"
 #define MAXSUBFUN 512
 
 #ifdef USBKEYBOARD
-#define MagicKey 0x5C765A65
+#define MagicKey 0x5C721A65
 #else
-#define MagicKey 0x1A456EB4
+#define MagicKey 0x1A721EB4
 #endif
 #else
 #define HEAP_MEMORY_SIZE (128 * 1024)
 #define MAXGLOBALVARS 256 // Configurable split
 #define MAXLOCALVARS 240
 #define MAXVARS (MAXGLOBALVARS + MAXLOCALVARS)
-#define FLASH_TARGET_OFFSET (848 * 1024)
+#define FLASH_TARGET_OFFSET (832 * 1024)
 #define MAX_CPU 420000
 #define MAXSUBFUN 256
 
 #ifdef USBKEYBOARD
-#define MagicKey 0x0E456DDA
+#define MagicKey 0x0E721DDA
 #else
-#define MagicKey 0xF67653C5
+#define MagicKey 0xF12753C5
 #endif
 #endif
 

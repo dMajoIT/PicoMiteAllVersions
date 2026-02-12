@@ -687,6 +687,8 @@ void DrawPixelNormal(int x, int y, int c)
 #endif
 void ClearScreen(int c)
 {
+    if (!Option.DISPLAY_TYPE)
+        return;
 #if PICOMITERP2350
     if (ScrollLCD == ScrollLCDMEM332)
     {

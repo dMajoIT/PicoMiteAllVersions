@@ -2476,6 +2476,19 @@ void MIPS16 cmd_save(void)
             ClearVars(0, false);
         return;
     }
+    if ((p = checkstring(cmdline, (unsigned char *)"DATA")) != NULL)
+    {
+        getcsargs(&p, 5);
+        if (argc != 5)
+            SyntaxError();
+        pp = getFstring(argv[0]);
+        if (!BasicFileOpen((char *)pp, fnbr, FA_WRITE | FA_CREATE_ALWAYS))
+            return;
+        outbuf = (unsigned char *)GetPeekAddr(argv[2]);
+        FilePutData((char *)outbuf, fnbr, getint(argv[4], 1, 0x7FFFFFFF));
+        FileClose(fnbr);
+        return;
+    }
     if ((p = checkstring(cmdline, (unsigned char *)"COMPRESSED IMAGE")) != NULL)
     {
         if (!(ReadBuffer == ReadBuffer16 || ReadBuffer == ReadBuffer2))
@@ -4008,6 +4021,26 @@ void MIPS16 cmd_load(void)
         CheckDisplay();
         cmd_LoadImage(p);
         return;
+    }
+    p = checkstring(cmdline, (unsigned char *)"DATA");
+    if (p)
+    {
+        int fnbr;
+        unsigned char *pp, *q;
+        getcsargs(&p, 3);
+        if (argc != 3)
+            SyntaxError();
+        pp = getFstring(argv[0]);
+        fnbr = FindFreeFileNbr();
+        if (!BasicFileOpen((char *)pp, fnbr, FA_READ))
+            return;
+        q = (unsigned char *)GetPokeAddr(argv[2]);
+        while (!FileEOF(fnbr))
+        {
+            *q++ = FileGetChar(fnbr);
+        }
+        FileClose(fnbr);
+         return;
     }
     p = checkstring(cmdline, (unsigned char *)"BMP");
     if (p)
