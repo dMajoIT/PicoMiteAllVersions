@@ -2135,7 +2135,7 @@ void MIPS16 cmd_library(void)
         // now write the library from ram to the library flash area
         // initialise for writing to the flash
         FlashWriteInit(LIBRARY_FLASH);
-        flash_range_erase(realflashpointer, MAX_PROG_SIZE);
+        safe_flash_range_erase(realflashpointer, MAX_PROG_SIZE);
         i = MAX_PROG_SIZE / 4;
 
         int *ppp = (int *)(flash_progmemory - MAX_PROG_SIZE);
@@ -2186,7 +2186,7 @@ void MIPS16 cmd_library(void)
             return;
 
         FlashWriteInit(LIBRARY_FLASH);
-        flash_range_erase(realflashpointer, MAX_PROG_SIZE);
+        safe_flash_range_erase(realflashpointer, MAX_PROG_SIZE);
         i = MAX_PROG_SIZE / 4;
 
         int *ppp = (int *)(flash_progmemory - MAX_PROG_SIZE);
@@ -2309,7 +2309,7 @@ void MIPS16 cmd_library(void)
         if (fsize > MAX_PROG_SIZE)
             error("File size % should be % or less", fsize, MAX_PROG_SIZE);
         FlashWriteInit(LIBRARY_FLASH);
-        flash_range_erase(realflashpointer, MAX_PROG_SIZE);
+        safe_flash_range_erase(realflashpointer, MAX_PROG_SIZE);
         int i = MAX_PROG_SIZE / 4;
         int *ppp = (int *)(flash_progmemory - MAX_PROG_SIZE);
         while (i--)
@@ -4641,6 +4641,8 @@ void MIPS16 cmd_option(void)
             error("Pin | is in use", pin1);
         if (!(pin1 == 1 || pin1 == 11 || pin1 == 25 || pin1 == 62))
             error("Invalid pin for PSRAM chip select (GP0,GP8,GP19,GP47)");
+        if (Option.CPU_Speed > 384000)
+            error("PSRAM cannot be enabled when CPUSPEED exceeds 384000 KHz");
         Option.PSRAM_CS_PIN = pin1;
         SaveOptions();
         SoftReset(SOFT_RESET);
@@ -5758,6 +5760,8 @@ void MIPS16 cmd_option(void)
         if (CurrentLinePtr)
             StandardError(10);
         speed = getint(tp, MIN_CPU, MAX_CPU);
+        if (speed > 384000 && Option.PSRAM_CS_PIN != 0)
+            error("CPUSPEED cannot exceed 384000 KHz when PSRAM is enabled");
         uint vco, postdiv1, postdiv2;
         if (!check_sys_clock_khz(speed, &vco, &postdiv1, &postdiv2))
             error("Invalid clock speed");
@@ -6708,11 +6712,11 @@ void MIPS16 cmd_option(void)
         FileClose(fnbr);
         uSec(100000);
         disable_interrupts_pico();
-        flash_range_erase(FLASH_TARGET_OFFSET, FLASH_ERASE_SIZE);
+        safe_flash_range_erase(FLASH_TARGET_OFFSET, FLASH_ERASE_SIZE);
         enable_interrupts_pico();
         uSec(10000);
         disable_interrupts_pico();
-        flash_range_program(FLASH_TARGET_OFFSET, (const uint8_t *)&Option, 768);
+        safe_flash_range_program(FLASH_TARGET_OFFSET, (const uint8_t *)&Option, 768);
         enable_interrupts_pico();
         SoftReset(SOFT_RESET);
     }
@@ -6726,7 +6730,7 @@ void MIPS16 cmd_option(void)
             uint32_t j = FLASH_TARGET_OFFSET + FLASH_ERASE_SIZE + SAVEDVARS_FLASH_SIZE + ((MAXFLASHSLOTS - 1) * MAX_PROG_SIZE);
             uSec(250000);
             disable_interrupts_pico();
-            flash_range_erase(j, MAX_PROG_SIZE);
+            safe_flash_range_erase(j, MAX_PROG_SIZE);
             enable_interrupts_pico();
         }
         configure(tp);

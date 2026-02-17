@@ -574,7 +574,11 @@ uint8_t PSRAMpin;
             {
                 WITH_FRAMEBUFFER_LOCK(SPIatRisk, checkWAVinput());
             }
-            else if (CurrentlyPlaying == P_MOD || CurrentlyPlaying == P_ARRAY)
+            else if (CurrentlyPlaying == P_MOD || CurrentlyPlaying == P_ARRAY
+#ifdef rp2350
+                     || CurrentlyPlaying == P_SAMPLE
+#endif
+            )
             {
                 checkWAVinput();
             }
@@ -2569,7 +2573,7 @@ int __not_in_flash_func(MMInkey)(void)
         MMPrintString("Error: Invalid address - resetting\r\n");
         uSec(250000);
         disable_interrupts_pico();
-        //	flash_range_erase(PROGSTART, MAX_PROG_SIZE);
+        //	safe_flash_range_erase(PROGSTART, MAX_PROG_SIZE);
         LoadOptions();
         if (Option.NoReset == 0)
         {
@@ -5326,7 +5330,9 @@ uint32_t testPSRAM(void)
         pads_qspi_hw->io[4] = 0x6B;
         pads_qspi_hw->io[5] = 0x6B;
         if (Option.CPU_Speed <= 288000)
-            qmi_hw->m[0].timing = 0x40006202;
+            qmi_hw->m[0].timing = 0x40006202; // COOLDOWN=1, RXDELAY=2, MIN_DESELECT=6, CLKDIV=2
+        else
+            qmi_hw->m[0].timing = 0x40006204; // COOLDOWN=1, RXDELAY=2, MIN_DESELECT=6, CLKDIV=4
         sleep_ms(2);
 #endif
 #if defined(HDMI) && defined(rp2350)
@@ -5343,7 +5349,9 @@ uint32_t testPSRAM(void)
         pads_qspi_hw->io[4] = 0x6B;
         pads_qspi_hw->io[5] = 0x6B;
         if (Option.CPU_Speed <= 288000)
-            qmi_hw->m[0].timing = 0x40006202;
+            qmi_hw->m[0].timing = 0x40006202; // COOLDOWN=1, RXDELAY=2, MIN_DESELECT=6, CLKDIV=2
+        else
+            qmi_hw->m[0].timing = 0x40006204; // COOLDOWN=1, RXDELAY=2, MIN_DESELECT=6, CLKDIV=4
         sleep_ms(2);
 #endif
         PWM_FREQ = 44100;
@@ -5972,7 +5980,7 @@ uint32_t testPSRAM(void)
 #endif
         memcpy(buf, tknbuf, STRINGSIZE); // save the token buffer because we are going to use it
         FlashWriteInit(PROGRAM_FLASH);
-        flash_range_erase(realflashpointer, MAX_PROG_SIZE);
+        safe_flash_range_erase(realflashpointer, MAX_PROG_SIZE);
         j = MAX_PROG_SIZE / 4;
         int *pp = (int *)(flash_progmemory);
         while (j--)

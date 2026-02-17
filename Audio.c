@@ -84,6 +84,28 @@ static int arraypos = 0;
 static int arraysize = 0;
 short *leftarray = NULL, *rightarray = NULL;
 
+#ifdef rp2350
+// ADSR envelope state for PLAY SAMPLE
+typedef enum
+{
+	ADSR_IDLE,
+	ADSR_ATTACK,
+	ADSR_DECAY,
+	ADSR_SUSTAIN,
+	ADSR_RELEASE
+} e_ADSRPhase;
+static volatile e_ADSRPhase adsr_phase = ADSR_IDLE;
+static volatile int32_t adsr_level = 0;		// current envelope level in 16.16 fixed-point (0 to 2000<<16)
+static volatile int32_t adsr_attack_inc;	// increment per sample during attack phase
+static volatile int32_t adsr_decay_dec;		// decrement per sample during decay phase
+static volatile int32_t adsr_sustain_level; // sustain level in 16.16 fixed-point
+static volatile int32_t adsr_release_dec;	// decrement per sample during release phase
+static volatile int sample_looping = 0;		// flag: 1 = looping waveform for PLAY SAMPLE
+static uint32_t sample_phase = 0;			// 16.16 fixed-point position in waveform cycle
+static uint32_t sample_phase_inc = 0;		// 16.16 fixed-point advance per output sample
+static int sample_cycle_len = 0;			// number of int64 elements per waveform cycle
+#endif
+
 /********************************************************************************************************************************************
 commands and functions
  each function is responsible for decoding a command
@@ -110,9 +132,9 @@ commands and functions
  ********************************************************************************************************************************************/
 
 // define the PWM output frequency for making a tone
-const char *const PlayingStr[] = {"PAUSED TONE", "PAUSED FLAC", "PAUSED MP3", "PAUSED SOUND", "PAUSED MOD", "PAUSED ARRAY", "PAUSED WAV", "OFF",
+const char *const PlayingStr[] = {"PAUSED TONE", "PAUSED FLAC", "PAUSED MP3", "PAUSED SOUND", "PAUSED MOD", "PAUSED ARRAY", "PAUSED WAV", "PAUSED SAMPLE", "OFF",
 								  "OFF", "TONE", "SOUND", "WAV", "FLAC", "MP3",
-								  "MIDI", "", "MOD", "STREAM", "ARRAY", ""};
+								  "MIDI", "", "MOD", "STREAM", "ARRAY", "SAMPLE", ""};
 volatile unsigned char PWM_count = 0;
 volatile float PhaseM_left, PhaseM_right;
 volatile uint64_t SoundPlay;
@@ -1132,6 +1154,84 @@ unsigned int readarray(char *sbuff)
 		playreadcomplete = 1;
 	return count * 2;
 };
+
+#ifdef rp2350
+// Advance the ADSR envelope by one sample tick (16.16 fixed-point)
+static inline void adsr_tick(void)
+{
+	switch (adsr_phase)
+	{
+	case ADSR_ATTACK:
+		adsr_level += adsr_attack_inc;
+		if (adsr_level >= (2000 << 16))
+		{
+			adsr_level = (2000 << 16);
+			adsr_phase = ADSR_DECAY;
+		}
+		break;
+	case ADSR_DECAY:
+		adsr_level -= adsr_decay_dec;
+		if (adsr_level <= adsr_sustain_level)
+		{
+			adsr_level = adsr_sustain_level;
+			adsr_phase = (adsr_sustain_level > 0) ? ADSR_SUSTAIN : ADSR_IDLE;
+			if (adsr_phase == ADSR_IDLE)
+				playreadcomplete = 1; // sustain=0 means note dies after decay
+		}
+		break;
+	case ADSR_SUSTAIN:
+		// hold at sustain level - nothing to do
+		break;
+	case ADSR_RELEASE:
+		adsr_level -= adsr_release_dec;
+		if (adsr_level <= 0)
+		{
+			adsr_level = 0;
+			adsr_phase = ADSR_IDLE;
+			playreadcomplete = 1; // signal end of note
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+// Fill a buffer with looping sample data, applying the ADSR envelope per-sample.
+// Uses a 16.16 fixed-point phase accumulator to step through the waveform at the
+// correct rate for the desired pitch. Reads the low 16 bits of each int64 element
+// (one sample per integer, not packed shorts).
+unsigned int readsamplearray(char *sbuff)
+{
+	short *buff = (short *)sbuff;
+	int maxcount = WAV_BUFFER_SIZE / (sizeof(short) * 2);
+	uint32_t cycle_wrap = (uint32_t)sample_cycle_len << 16;
+	int actual = 0;
+	for (int i = 0; i < maxcount; i++)
+	{
+		int idx = (sample_phase >> 16) % sample_cycle_len;
+		int env = adsr_level >> 16; // extract integer part (0-2000)
+		// Read low 16 bits of each int64 element (idx*4 skips sign-extension shorts)
+		*buff++ = (short)((int)leftarray[idx * 4] * env / 2000);
+		*buff++ = (short)((int)rightarray[idx * 4] * env / 2000);
+		actual++;
+		sample_phase += sample_phase_inc;
+		if (sample_phase >= cycle_wrap)
+			sample_phase -= cycle_wrap;
+		adsr_tick();
+		if (adsr_phase == ADSR_IDLE && adsr_level <= 0)
+		{
+			// Zero-fill the rest of the buffer to avoid pops/ticks
+			for (int j = actual; j < maxcount; j++)
+			{
+				*buff++ = 0;
+				*buff++ = 0;
+			}
+			break; // envelope finished
+		}
+	}
+	return actual * 2;
+}
+#endif
 /*  @endcond */
 // The MMBasic command:  PLAY
 void MIPS16 cmd_play(void)
@@ -1283,6 +1383,10 @@ void MIPS16 cmd_play(void)
 			CurrentlyPlaying = P_PAUSE_MOD;
 		else if (CurrentlyPlaying == P_ARRAY)
 			CurrentlyPlaying = P_PAUSE_ARRAY;
+#ifdef rp2350
+		else if (CurrentlyPlaying == P_SAMPLE)
+			CurrentlyPlaying = P_PAUSE_SAMPLE;
+#endif
 		else
 			error("Nothing playing");
 		return;
@@ -1303,6 +1407,10 @@ void MIPS16 cmd_play(void)
 			CurrentlyPlaying = P_MOD;
 		else if (CurrentlyPlaying == P_PAUSE_ARRAY)
 			CurrentlyPlaying = P_ARRAY;
+#ifdef rp2350
+		else if (CurrentlyPlaying == P_PAUSE_SAMPLE)
+			CurrentlyPlaying = P_SAMPLE;
+#endif
 		else
 			error("Nothing to resume");
 		return;
@@ -1464,6 +1572,104 @@ void MIPS16 cmd_play(void)
 		pwm_set_enabled(AUDIO_SLICE, true);
 		return;
 	}
+#ifdef rp2350
+	if ((tp = checkstring(cmdline, (unsigned char *)"SAMPLE")))
+	{ // PLAY SAMPLE left%(), right%(), frequency, attack, decay, sustain, release [,interrupt]
+		float freq;
+		getcsargs(&tp, 15); // this MUST be the first executable line in the function
+		if (!(argc == 13 || argc == 15))
+			StandardError(2);
+		if (!(CurrentlyPlaying == P_NOTHING || CurrentlyPlaying == P_STOP || CurrentlyPlaying == P_WAVOPEN || CurrentlyPlaying == P_SAMPLE || CurrentlyPlaying == P_PAUSE_SAMPLE))
+			error("Sound output in use for $", PlayingStr[CurrentlyPlaying]);
+		arraysize = parseintegerarray(argv[0], (int64_t **)&leftarray, 1, 1, NULL, false, NULL);
+		if (parseintegerarray(argv[2], (int64_t **)&rightarray, 2, 1, NULL, false, NULL) != arraysize)
+			StandardError(16);
+		arraysize *= 4;
+		freq = getnumber(argv[4]);
+		if (freq < 10.0 || freq > 48000.0)
+			error("Invalid frequency 10.0 - 48000.0");
+		int attack_ms = getint(argv[6], 0, 30000);
+		int decay_ms = getint(argv[8], 0, 30000);
+		int sustain_pct = getint(argv[10], 0, 100);
+		int release_ms = getint(argv[12], 0, 30000);
+		if (argc == 15)
+		{
+			if (!CurrentLinePtr)
+				error("No program running");
+			WAVInterrupt = (char *)GetIntAddress(argv[14]); // get the interrupt location
+			WAVcomplete = false;
+			InterruptUsed = true;
+		}
+		// Stop existing ISR before changing buffers/state (prevents glitch on restart)
+		if (CurrentlyPlaying == P_SAMPLE || CurrentlyPlaying == P_PAUSE_SAMPLE)
+			pwm_set_irq0_enabled(AUDIO_SLICE, false);
+		// Save the number of int64 elements as the waveform cycle length
+		sample_cycle_len = arraysize / 4;
+		// Use a fixed output sample rate with audiorepeat=1 so each buffer sample
+		// is clocked out once. A phase accumulator in readsamplearray() steps
+		// through the waveform table at the correct rate for the desired pitch.
+		audiorepeat = 1;
+		float actualrate = 44100.0f;
+		if (freq > actualrate / 2.0f)
+			actualrate = freq * 2.5f; // ensure Nyquist headroom
+		// Phase increment per output sample (16.16 fixed-point):
+		// To produce freq Hz from a cycle_len-sample table at actualrate output rate,
+		// advance = cycle_len * freq / actualrate elements per output sample.
+		sample_phase_inc = (uint32_t)((float)sample_cycle_len * freq / actualrate * 65536.0f);
+		sample_phase = 0;
+		// Pre-compute ADSR rates (16.16 fixed-point per-sample increments)
+		// adsr_tick() fires once per output sample at actualrate Hz.
+		int32_t sustain_val = mapping[sustain_pct]; // 0-2000
+		int ticks_per_ms = (int)(actualrate / 1000.0f);
+		if (ticks_per_ms < 1)
+			ticks_per_ms = 1;
+		adsr_attack_inc = attack_ms > 0 ? (2000 << 16) / (attack_ms * ticks_per_ms) : (2000 << 16);
+		adsr_decay_dec = decay_ms > 0 ? ((2000 - sustain_val) << 16) / (decay_ms * ticks_per_ms) : ((2000 - sustain_val) << 16);
+		adsr_sustain_level = sustain_val << 16;
+		adsr_release_dec = release_ms > 0 ? (adsr_sustain_level > 0 ? adsr_sustain_level / (release_ms * ticks_per_ms) : (2000 << 16)) : (2000 << 16);
+		if (adsr_attack_inc < 1)
+			adsr_attack_inc = 1;
+		if (adsr_decay_dec < 1 && (2000 - sustain_val) > 0)
+			adsr_decay_dec = 1;
+		if (adsr_release_dec < 1 && sustain_val > 0)
+			adsr_release_dec = 1;
+		adsr_phase = ADSR_ATTACK;
+		adsr_level = 0;
+		sample_looping = 1;
+		setrate((int)actualrate);
+		FreeMemorySafe((void **)&sbuff1);
+		FreeMemorySafe((void **)&sbuff2);
+		sbuff1 = GetMemory(WAV_BUFFER_SIZE);
+		sbuff2 = GetMemory(WAV_BUFFER_SIZE);
+		ubuff1 = (uint16_t *)sbuff1;
+		ubuff2 = (uint16_t *)sbuff2;
+		mono = 0;
+		g_buff1 = (int16_t *)sbuff1;
+		g_buff2 = (int16_t *)sbuff2;
+		bcount[2] = 0;
+		playreadcomplete = 0;
+		bcount[1] = (volatile unsigned int)readsamplearray(sbuff1);
+		if (Option.audio_i2s_bclk)
+			i2sconvert((drwav_int16 *)sbuff1, (drwav_int16 *)sbuff1, bcount[1]);
+		else
+			iconvert(ubuff1, (int16_t *)sbuff1, bcount[1]);
+		wav_filesize = bcount[1];
+		CurrentlyPlaying = P_SAMPLE;
+		swingbuf = 1;
+		nextbuf = 2;
+		ppos = 0;
+		pwm_set_irq0_enabled(AUDIO_SLICE, true);
+		pwm_set_enabled(AUDIO_SLICE, true);
+		return;
+	}
+	if (checkstring(cmdline, (unsigned char *)"RELEASE"))
+	{ // PLAY RELEASE - trigger ADSR release phase
+		if (CurrentlyPlaying != P_SAMPLE && CurrentlyPlaying != P_PAUSE_SAMPLE)
+			error("Not playing a sample");
+		adsr_phase = ADSR_RELEASE;
+		return;
+	}
+#endif
 	if ((tp = checkstring(cmdline, (unsigned char *)"SOUND")))
 	{ // PLAY SOUND channel, type, position, frequency, volume
 		float f_in, PhaseM;
@@ -2376,7 +2582,7 @@ void MIPS16 cmd_play(void)
 			positionfile(WAV_fnbr, 0, false);
 			uint32_t j = RoundUpK4(TOP_OF_SYSTEM_FLASH);
 			disable_interrupts_pico();
-			flash_range_erase(j, RoundUpK4(fsize));
+			safe_flash_range_erase(j, RoundUpK4(fsize));
 			enable_interrupts_pico();
 			while (!FileEOF(WAV_fnbr))
 			{
@@ -2388,7 +2594,7 @@ void MIPS16 cmd_play(void)
 					r[i] = FileGetChar(WAV_fnbr);
 				}
 				disable_interrupts_pico();
-				flash_range_program(j, (uint8_t *)r, 256);
+				safe_flash_range_program(j, (uint8_t *)r, 256);
 				enable_interrupts_pico();
 				routinechecks();
 				j += 256;
@@ -2689,6 +2895,30 @@ void checkWAVinput(void)
 				}
 				nextbuf = swingbuf;
 			}
+#ifdef rp2350
+			else if (CurrentlyPlaying == P_SAMPLE)
+			{
+				if (swingbuf == 2)
+				{
+					bcount[1] = (volatile unsigned int)readsamplearray(sbuff1);
+					if (Option.audio_i2s_bclk)
+						i2sconvert((drwav_int16 *)sbuff1, (drwav_int16 *)sbuff1, bcount[1]);
+					else
+						iconvert(ubuff1, (int16_t *)sbuff1, bcount[1]);
+					wav_filesize = bcount[1];
+				}
+				else
+				{
+					bcount[2] = (volatile unsigned int)readsamplearray(sbuff2);
+					if (Option.audio_i2s_bclk)
+						i2sconvert((drwav_int16 *)sbuff2, (drwav_int16 *)sbuff2, bcount[2]);
+					else
+						iconvert(ubuff2, (int16_t *)sbuff2, bcount[2]);
+					wav_filesize = bcount[2];
+				}
+				nextbuf = swingbuf;
+			}
+#endif
 		}
 	}
 	if (wav_filesize <= 0 && (CurrentlyPlaying == P_WAV || (CurrentlyPlaying == P_FLAC) || (CurrentlyPlaying == P_MP3) || (CurrentlyPlaying == P_MIDI)))
@@ -2732,6 +2962,7 @@ void audio_checks(void)
 		{
 			if (Option.AUDIO_MISO_PIN && VSbuffer > 32)
 				return;
+			int wasPlaying = CurrentlyPlaying; // save before StopAudio changes it
 			if (CurrentlyPlaying == P_FLAC)
 				drflac_close(myflac);
 			if (CurrentlyPlaying == P_MOD)
@@ -2755,7 +2986,7 @@ void audio_checks(void)
 			}
 			else
 				StopAudio();
-			if (CurrentlyPlaying != P_ARRAY)
+			if (wasPlaying != P_ARRAY && wasPlaying != P_SAMPLE)
 				FileClose(WAV_fnbr);
 			WAVcomplete = true;
 		}

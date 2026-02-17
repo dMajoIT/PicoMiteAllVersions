@@ -2154,7 +2154,7 @@ void cmd_port(void)
                 error("Invalid output pin");
             mask |= (1 << PinDef[pin].GPno);
             if (value & 1)
-                setmask |= (1 << PinDef[pin].GPno);
+                setmask |= (1ll << PinDef[pin].GPno);
             value >>= 1;
             nbr--;
             pincode++;
@@ -2250,9 +2250,9 @@ void fun_port(void)
                 error("Invalid input pin");
             value <<= 1;
             if (ExtCurrentConfig[pin] == EXT_DIG_OUT)
-                value |= (outpinstate & (1 << PinDef[pin].GPno) ? 1 : 0);
+                value |= (outpinstate & (1ll << PinDef[pin].GPno) ? 1 : 0);
             else
-                value |= (pinstate & (1 << PinDef[pin].GPno) ? 1 : 0);
+                value |= (pinstate & (1ll << PinDef[pin].GPno) ? 1 : 0);
             nbr--;
             pincode--;
         }

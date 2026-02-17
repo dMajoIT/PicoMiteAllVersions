@@ -10961,14 +10961,21 @@ void DrawBitmap2(int x1, int y1, int width, int height, int scale, int fc, int b
             int yt = y1 / ya;
             int w = width * scale / xa;
             int h = height * scale / ya;
+            // clamp tile loop bounds to valid tile range
+            int endx = (xt + w > X_TILE) ? X_TILE : xt + w;
+            int endy = (yt + h > Y_TILE) ? Y_TILE : yt + h;
+            if (xt < 0)
+                xt = 0;
+            if (yt < 0)
+                yt = 0;
 //            int pos;
 #ifdef HDMI
             if (FullColour)
             {
 #endif
-                for (int yy = yt; yy < yt + h; yy++)
+                for (int yy = yt; yy < endy; yy++)
                 {
-                    for (int xx = xt; xx < xt + w; xx++)
+                    for (int xx = xt; xx < endx; xx++)
                     {
                         tilefcols[yy * X_TILE + xx] = (uint16_t)fcolour;
                         tilebcols[yy * X_TILE + xx] = (uint16_t)bcolour;
@@ -10978,9 +10985,9 @@ void DrawBitmap2(int x1, int y1, int width, int height, int scale, int fc, int b
             }
             else
             {
-                for (int yy = yt; yy < yt + h; yy++)
+                for (int yy = yt; yy < endy; yy++)
                 {
-                    for (int xx = xt; xx < xt + w; xx++)
+                    for (int xx = xt; xx < endx; xx++)
                     {
                         tilefcols_w[yy * X_TILE + xx] = (uint8_t)fcolour;
                         tilebcols_w[yy * X_TILE + xx] = (uint8_t)bcolour;

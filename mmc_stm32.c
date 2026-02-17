@@ -304,7 +304,11 @@ void MIPS16 __not_in_flash_func(on_pwm_wrap)(void)
 			}
 			return;
 		}
-		else if (CurrentlyPlaying == P_WAV || CurrentlyPlaying == P_FLAC || CurrentlyPlaying == P_MOD || CurrentlyPlaying == P_MP3 || CurrentlyPlaying == P_ARRAY)
+		else if (CurrentlyPlaying == P_WAV || CurrentlyPlaying == P_FLAC || CurrentlyPlaying == P_MOD || CurrentlyPlaying == P_MP3 || CurrentlyPlaying == P_ARRAY
+#ifdef rp2350
+				 || CurrentlyPlaying == P_SAMPLE
+#endif
+		)
 		{
 			while ((pioi2s->flevel & (0xf << (i2ssm * 8))) < (0x6 << (i2ssm * 8)))
 			{
@@ -462,7 +466,11 @@ void MIPS16 __not_in_flash_func(on_pwm_wrap)(void)
 			if (VSbuffer > 1023 - (CurrentlyPlaying == P_STREAM ? sendstream : sendcount))
 				return;
 		}
-		if (CurrentlyPlaying == P_FLAC || CurrentlyPlaying == P_WAV || CurrentlyPlaying == P_MP3 || CurrentlyPlaying == P_MIDI || CurrentlyPlaying == P_ARRAY || CurrentlyPlaying == P_MOD)
+		if (CurrentlyPlaying == P_FLAC || CurrentlyPlaying == P_WAV || CurrentlyPlaying == P_MP3 || CurrentlyPlaying == P_MIDI || CurrentlyPlaying == P_ARRAY
+#ifdef rp2350
+			|| CurrentlyPlaying == P_SAMPLE
+#endif
+			|| CurrentlyPlaying == P_MOD)
 		{
 			if (bcount[1] == 0 && bcount[2] == 0 && playreadcomplete == 1)
 			{
@@ -642,7 +650,11 @@ void MIPS16 __not_in_flash_func(on_pwm_wrap)(void)
 				}
 			}
 		}
-		else if (CurrentlyPlaying == P_WAV || CurrentlyPlaying == P_FLAC || CurrentlyPlaying == P_MOD || CurrentlyPlaying == P_ARRAY || CurrentlyPlaying == P_MP3)
+		else if (CurrentlyPlaying == P_WAV || CurrentlyPlaying == P_FLAC || CurrentlyPlaying == P_MOD || CurrentlyPlaying == P_ARRAY
+#ifdef rp2350
+				 || CurrentlyPlaying == P_SAMPLE
+#endif
+				 || CurrentlyPlaying == P_MP3)
 		{
 			if (--repeatcount)
 				return;
@@ -2074,7 +2086,7 @@ void InitReservedIO(void)
 			I2C_enabled = 1;
 			I2C0SDApin = Option.SYSTEM_I2C_SDA;
 			I2C0SCLpin = Option.SYSTEM_I2C_SCL;
-			I2C_Timeout = (Option.SYSTEM_I2C_SLOW ? SystemI2CTimeout*5 : SystemI2CTimeout);
+			I2C_Timeout = (Option.SYSTEM_I2C_SLOW ? SystemI2CTimeout * 5 : SystemI2CTimeout);
 		}
 		else
 		{
@@ -2085,7 +2097,7 @@ void InitReservedIO(void)
 			I2C2_enabled = 1;
 			I2C1SDApin = Option.SYSTEM_I2C_SDA;
 			I2C1SCLpin = Option.SYSTEM_I2C_SCL;
-			I2C2_Timeout = (Option.SYSTEM_I2C_SLOW ? SystemI2CTimeout*5 : SystemI2CTimeout);
+			I2C2_Timeout = (Option.SYSTEM_I2C_SLOW ? SystemI2CTimeout * 5 : SystemI2CTimeout);
 		}
 		if (Option.RTC)
 			RtcGetTime(1);

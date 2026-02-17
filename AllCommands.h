@@ -389,6 +389,7 @@ void fun_dev(void);
 void fun_map(void);
 void fun_touch(void);
 void fun_linputstr(void);
+void fun_frame(void);
 #endif /* !defined(INCLUDE_COMMAND_TABLE) && !defined(INCLUDE_TOKEN_TABLE) */
 
 /* ============================================================================
@@ -567,9 +568,6 @@ void fun_linputstr(void);
 	{(unsigned char *)"Set", T_CMD, 0, cmd_set},
 	{(unsigned char *)"Byte(", T_CMD | T_FUN, 0, cmd_byte},
 	{(unsigned char *)"Flag(", T_CMD | T_FUN, 0, cmd_flag},
-/*frame
-	{ (unsigned char *)"Frame",		T_CMD | T_FUN,				0, cmd_frame	},
-*/
 #ifdef PICOMITEVGA
 	{(unsigned char *)"TILE", T_CMD, 0, cmd_tile},
 	{(unsigned char *)"MODE", T_CMD, 0, cmd_mode},
@@ -635,6 +633,7 @@ void fun_linputstr(void);
 	{(unsigned char *)"Astro", T_CMD, 0, cmd_star},
 	{(unsigned char *)"Location", T_CMD, 0, cmd_locate},
 	{(unsigned char *)"Stepper", T_CMD, 0, cmd_stepper},
+	{(unsigned char *)"Frame", T_CMD, 0, cmd_frame},
 #ifndef PICOMITEWEB
 	{(unsigned char *)"Ray", T_CMD, 0, cmd_ray},
 #endif
@@ -804,6 +803,7 @@ void fun_linputstr(void);
 	{(unsigned char *)"Struct(", T_FUN | T_INT, 0, fun_struct},
 #endif
 #ifdef rp2350
+	{(unsigned char *)"Frame(", T_FUN | T_INT | T_NBR | T_STR, 0, fun_frame},
 #ifndef PICOMITEWEB
 	{(unsigned char *)"Ray(", T_FUN | T_INT | T_NBR, 0, fun_ray},
 #endif

@@ -888,6 +888,13 @@ int MIPS16 PrepareProgramExt(unsigned char *p, int i, unsigned char **CFunPtr, i
                 skipspace(p);
                 c = *p;
 
+                // Skip blank lines inside TYPE/END TYPE
+                if (c == 0)
+                {
+                    p++; // step over the zero terminator
+                    continue;
+                }
+
                 // Skip full-line comments inside TYPE/END TYPE
                 if (c == '\'')
                 {
@@ -1406,9 +1413,9 @@ void MIPS16 __not_in_flash_func(DefinedSubFun)(int isfun, unsigned char *cmd, in
                     error("Structure type mismatch: $", argv1[i]);
             }
 #endif
-            g_vartbl[g_VarIndex].val.s = g_vartbl[argVarIndex[i]].val.s; // Point to caller's array data
-            g_vartbl[g_VarIndex].type |= T_PTR;                          // Mark as pointer so we don't free caller's memory
-            for (j = 0; j < MAXDIM; j++)                                 // copy the dimensions of the supplied variable into our local variable
+            g_vartbl[g_VarIndex].val.s = argval[i].s; // Point to caller's array data (uses element offset if specified, e.g. array(3) -> &array[3])
+            g_vartbl[g_VarIndex].type |= T_PTR;       // Mark as pointer so we don't free caller's memory
+            for (j = 0; j < MAXDIM; j++)              // copy the dimensions of the supplied variable into our local variable
                 g_vartbl[g_VarIndex].dims[j] = g_vartbl[argVarIndex[i]].dims[j];
             g_vartbl[g_VarIndex].size = g_vartbl[argVarIndex[i]].size; // copy string length for string arrays
             continue;                                                  // Skip the rest of parameter handling
@@ -3568,6 +3575,7 @@ void MIPS32 __not_in_flash_func (*findvar)(unsigned char *p, int action)
     uint32_t hash = FNV_offset_basis;
     char *tp, *ip;
     int dim[MAXDIM];
+    int dim_error_deferred = 0; // set if V_NOFIND_NULL deferred a "Dimensions" error
 #ifdef rp2350
     uint32_t funhash;
 #endif
@@ -3716,7 +3724,16 @@ void MIPS32 __not_in_flash_func (*findvar)(unsigned char *p, int action)
                     in = FloatToInt32(f);
                 dim[i / 2] = in;
                 if (dim[i / 2] < g_OptionBase)
-                    error("Dimensions");
+                {
+                    // If caller will accept "not found", defer the error until
+                    // we know the variable actually exists.  This avoids false
+                    // "Dimensions" errors when a user-defined function like
+                    // SX(-24) is mistakenly parsed as an array reference.
+                    if (action & V_NOFIND_NULL)
+                        dim_error_deferred = 1;
+                    else
+                        error("Dimensions");
+                }
             }
 
             // After getargs, advance p past the (indices) - makeargs doesn't update *p
@@ -4010,6 +4027,8 @@ void MIPS32 __not_in_flash_func (*findvar)(unsigned char *p, int action)
 
         // if we reached this point it must be a reference to an existing array
         // check that we are not using DIM and that all parameters are within the dimensions
+        if (dim_error_deferred)
+            error("Dimensions");
         if (action & V_DIM_VAR)
             error("Cannot re dimension array");
         for (i = 0; i < dnbr; i++)

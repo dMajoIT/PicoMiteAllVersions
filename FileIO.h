@@ -403,6 +403,17 @@ extern "C"
         void SaveOptions(void);
         void ResetOptions(bool startup);
 
+/* ============================================================================
+ * Function declarations - Flash operation safety wrappers
+ * ============================================================================ */
+#ifdef rp2350
+        void safe_flash_range_erase(uint32_t flash_offs, size_t count);
+        void safe_flash_range_program(uint32_t flash_offs, const uint8_t *data, size_t count);
+#else
+#define safe_flash_range_erase flash_range_erase
+#define safe_flash_range_program flash_range_program
+#endif
+
         /* ============================================================================
          * Function declarations - Flash operations
          * ============================================================================ */

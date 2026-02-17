@@ -1824,7 +1824,7 @@ void MIPS16 cmd_new(void)
 	FlashLoad = 0;
 	uSec(250000);
 	FlashWriteInit(PROGRAM_FLASH);
-	flash_range_erase(realflashpointer, MAX_PROG_SIZE);
+	safe_flash_range_erase(realflashpointer, MAX_PROG_SIZE);
 	FlashWriteByte(0);
 	FlashWriteByte(0);
 	FlashWriteByte(0); // terminate the program in flash
@@ -3559,8 +3559,12 @@ void MIPS16 __not_in_flash_func(cmd_return)(void)
 	nextstmt = gosubstack[--gosubindex]; // return to the caller
 	CurrentLinePtr = errorstack[gosubindex];
 }
-/*frame
-#define c_topleft  218
+#ifdef rp2350
+// === Frame command implementation ===
+// Generalised frame/panel system with grid-based box drawing,
+// automatic panel registration, and panel-aware text output.
+
+#define c_topleft 218
 #define c_topright 191
 #define c_bottomleft 192
 #define c_bottomright 217
@@ -3571,7 +3575,7 @@ void MIPS16 __not_in_flash_func(cmd_return)(void)
 #define c_tdown 194
 #define c_tleft 195
 #define c_tright 180
-#define c_d_topleft  201
+#define c_d_topleft 201
 #define c_d_topright 187
 #define c_d_bottomleft 200
 #define c_d_bottomright 188
@@ -3582,340 +3586,1788 @@ void MIPS16 __not_in_flash_func(cmd_return)(void)
 #define c_d_tdown 203
 #define c_d_tleft 204
 #define c_d_tright 185
+#define c_ds_tleft 198	// single vertical, double horizontal right
+#define c_ds_tright 181 // single vertical, double horizontal left
+#define c_sd_tleft 199	// double vertical, single horizontal right
+#define c_sd_tright 182 // double vertical, single horizontal left
 
+typedef struct
+{
+	int x1, y1; // top-left of panel interior (panel-local coords)
+	int x2, y2; // bottom-right of panel interior
+	int cx, cy; // cursor within panel (relative to x1/y1)
+	bool active;
+	uint16_t *buffer;	// buffer to write to (NULL = main frame)
+	int buf_stride;		// row stride of buffer (0 = use framex)
+	uint8_t default_fc; // default foreground colour (RGB121 index)
+	uint8_t default_bc; // default background colour (RGB121 index)
+	uint16_t *vbuf;		// virtual buffer (NULL = no vbuf, write direct)
+	int vw, vh;			// virtual buffer dimensions
+	int sx, sy;			// scroll/viewport offset into virtual buffer
+} FramePanel;
 
-extern const int colours[16];
-extern void setterminal(void);
-unsigned short *frame=NULL, *outframe=NULL;
-bool framecursor=true;
-static int framex=0,framey=0;
-static inline void framewritechar(int x, int y, uint8_t ascii, uint8_t fcolour, uint8_t attributes){
-	if(x>=framex || y>=framey)return;
-	frame[(y*framex)+x]=ascii | (fcolour<<8) | (attributes<<12);
-}
-static inline uint16_t framegetchar(int x, int y ){
-	return frame[(y*framex)+x];
-}
-static void SCursor(int x, int y) {
-	char s[30];
-	ShowCursor(0);
-	CurrentX=x*gui_font_width;
-	CurrentY=y*gui_font_height;
-	sprintf(s,"\033[%d;%dH",y+1,x+1);
-	SSPrintString(s);
-	ShowCursor(framecursor);
-}
-static void SColour(int colour, int fore){
-	char s[24]={0};
-	int r=colour>>16;
-	int g=(colour>>8) & 0xFF;
-	int b=colour & 0xff;
-	if(fore){
-		strcpy(s,"\033[38;2;");
-		gui_fcolour=colour;
-	} else {
-		strcpy(s,"\033[48;2;");
-		gui_bcolour=colour;
-	}
-	sprintf(&s[7],"%d;%d;%dm",r,g,b);
-	SSPrintString(s);
-}
+typedef struct
+{
+	uint16_t *buffer;  // overlay's own frame buffer
+	int width, height; // dimensions in characters
+	int panel_id;	   // which panel ID this overlay is
+	int ox, oy;		   // display position on main frame
+	bool visible;	   // shown or hidden
+	int zorder;		   // z-order (higher = on top)
+} FrameOverlay;
 
-void cmd_frame(void){
-	unsigned char *p=NULL;
-	if((p=checkstring(cmdline,(unsigned char *)"CREATE"))){
-		if(frame)error("Frame already exists");
-		framex=HRes/gui_font_width;
-		framey=VRes/gui_font_height;
-		frame=(uint16_t *)GetMemory(framex*framey*sizeof(uint16_t));
-		outframe=(uint16_t *)GetMemory(framex*framey*sizeof(uint16_t));
-		for(int i=0;i<framex*framey;i++)outframe[i]=0xFFFF;
-		Option.Width=framex;
-		Option.Height=framey;
-		char sp[20]={0};
-		strcpy(sp,"\033[8;");
-		IntToStr(&sp[strlen(sp)],framey,10);
-		strcat(sp,";");
-		IntToStr(&sp[strlen(sp)],framex+1,10);
-		strcat(sp,"t");
-		SSPrintString(sp);
-		SSPrintString("\0337\033[2J\033[H");                            // vt100 clear screen and home cursor
-		ClearScreen(gui_bcolour);					//
+unsigned short *frame = NULL, *outframe = NULL;
+static bool framecursor_on = false; // FRAME CURSOR ON/OFF â€” serial cursor visibility
+static int frame_last_panel = 0;	// last panel_id written to by FRAME PRINT
+static int framex = 0, framey = 0;
+static int lcd_cursor_x = -1, lcd_cursor_y = -1; // LCD cursor screen position
+static bool lcd_cursor_active = false;			 // LCD inverted cursor is drawn
+static uint64_t lcd_cursor_blink_time = 0;		 // last blink toggle (microseconds)
+static bool lcd_cursor_blink_on = false;		 // true = cursor visible (inverted), false = normal
+#define CURSOR_BLINK_US 500000					 // cursor blink interval (500ms)
+static FramePanel *framepanels = NULL;
+static int num_panels = 0;
+static int max_panels = 0;
+static FrameOverlay *frame_overlays = NULL;
+static int num_overlays = 0;
+static int max_overlays = 0;
+static int overlay_zcounter = 0;
+
+// Ensure the framepanels array can hold at least 'needed' panels.
+// Grows the allocation in chunks of 8 when required.
+static void ensure_panels(int needed)
+{
+	if (needed <= max_panels)
 		return;
+	int newmax = (needed + 7) & ~7; // round up to next multiple of 8
+	FramePanel *np = (FramePanel *)GetMemory(newmax * sizeof(FramePanel));
+	if (framepanels)
+	{
+		memcpy(np, framepanels, num_panels * sizeof(FramePanel));
+		FreeMemorySafe((void **)&framepanels);
 	}
-	if(!frame)error("Frame not created");
-	if((p=checkstring(cmdline,(unsigned char *)"CURSOR"))){
-		if(checkstring(p,(unsigned char *)"ON")){
-			framecursor=true;
-			SSPrintString("\033[?25h");
-		} else if(checkstring(p,(unsigned char *)"OFF")){
-			ShowCursor(0);
-			framecursor=false;
-			SSPrintString("\033[?25l");
-		} else {
-			getcsargs(&p,3);
-			if(argc<3)SyntaxError();;
-			int x=getint(argv[0],0,framex-1);
-			int y=getint(argv[2],0,framey-1);
-			if(DISPLAY_TYPE==SCREENMODE1)tilefcols[y*X_TILE+x]=RGB121pack(gui_fcolour);
-			SCursor(x,y);
-		}
-	} else if((p=checkstring(cmdline,(unsigned char *)"BOX"))){
-		int fc=gui_fcolour;
-		bool dual=false;
-		getcsargs(&p,11);
-		if(argc<7)SyntaxError();;
-		int x=getint(argv[0],0,framex-1);
-		int y=getint(argv[2],0,framey-1);
-		int w=getint(argv[4],1,framex-1-x);
-		int h=getint(argv[6],1,framey-1-y);
-		if(argc>=9 && *argv[8])fc=getint(argv[8],0,WHITE);
-		if(argc==11){
-			if(checkstring(argv[10],(unsigned char *)"DOUBLE"))dual=true;
-		}
-		fc=RGB121(fc);
-		framewritechar(x,y,dual ? c_d_topleft : c_topleft,fc,0);
-		framewritechar(x+w,y,dual ? c_d_topright : c_topright,fc,0);
-		framewritechar(x+w,y+h,dual ? c_d_bottomright : c_bottomright,fc,0);
-		framewritechar(x,y+h,dual ? c_d_bottomleft : c_bottomleft,fc,0);
-		for(int i=x+1;i<x+w;i++){
-			framewritechar(i,y,dual ? c_d_horizontal : c_horizontal,fc,0);
-			framewritechar(i,y+h,dual ? c_d_horizontal : c_horizontal,fc,0);
-		}
-		for(int i=y+1;i<y+h;i++){
-			framewritechar(x,i,dual ? c_d_vertical : c_vertical,fc,0);
-			framewritechar(x+w,i,dual ? c_d_vertical : c_vertical,fc,0);
-		}
-		SCursor(1,1);
-	} else if((p=checkstring(cmdline,(unsigned char *)"QBOX"))){
-		int fc=gui_fcolour;
-		bool dual=false;
-		getcsargs(&p,15);
-		if(argc<9)SyntaxError();;
-		int x=getint(argv[0],0,framex-1);
-		int y=getint(argv[2],0,framey-1);
-		int w=getint(argv[4],1,framex-1-x);
-		int w2=getint(argv[6],1,framex-1-x-w);
-		int h=getint(argv[8],1,framey-1-y);
-		int h2=getint(argv[10],1,framey-1-y-h);
-		if(argc>=13 && *argv[12])fc=getint(argv[12],0,WHITE);
-		if(argc==15){
-			if(checkstring(argv[14],(unsigned char *)"DOUBLE"))dual=true;
-		}
-		fc=RGB121(fc);
-		framewritechar(x,y,dual ? c_d_topleft : c_topleft,fc,0);
-		framewritechar(x+w,y,dual ? c_d_tdown : c_tdown,fc,0);
-		framewritechar(x+w+w2,y,dual ? c_d_topright : c_topright,fc,0);
-		framewritechar(x,y+h,dual ? c_d_tleft : c_tleft,fc,0);
-		framewritechar(x+w,y+h,dual ? c_d_cross : c_cross,fc,0);
-		framewritechar(x+w+w2,y+h,dual ? c_d_tright : c_tright,fc,0);
-		framewritechar(x,y+h+h2,dual ? c_d_bottomleft : c_bottomleft,fc,0);
-		framewritechar(x+w,y+h+h2,dual ? c_d_tup : c_tup,fc,0);
-		framewritechar(x+w+w2,y+h+h2,dual ? c_d_bottomright : c_bottomright,fc,0);
-		for(int i=x+1;i<x+w;i++){
-			framewritechar(i,y,dual ? c_d_horizontal : c_horizontal,fc,0);
-			framewritechar(i,y+h,dual ? c_d_horizontal : c_horizontal,fc,0);
-			framewritechar(i,y+h+h2,dual ? c_d_horizontal : c_horizontal,fc,0);
-		}
-		for(int i=x+1+w;i<x+w+w2;i++){
-			framewritechar(i,y,dual ? c_d_horizontal : c_horizontal,fc,0);
-			framewritechar(i,y+h,dual ? c_d_horizontal : c_horizontal,fc,0);
-			framewritechar(i,y+h+h2,dual ? c_d_horizontal : c_horizontal,fc,0);
-		}
-		for(int i=y+1;i<y+h;i++){
-			framewritechar(x,i,dual ? c_d_vertical : c_vertical,fc,0);
-			framewritechar(x+w,i,dual ? c_d_vertical : c_vertical,fc,0);
-			framewritechar(x+w+w2,i,dual ? c_d_vertical : c_vertical,fc,0);
-		}
-		for(int i=y+1+h;i<y+h+h2;i++){
-			framewritechar(x,i,dual ? c_d_vertical : c_vertical,fc,0);
-			framewritechar(x+w,i,dual ? c_d_vertical : c_vertical,fc,0);
-			framewritechar(x+w+w2,i,dual ? c_d_vertical : c_vertical,fc,0);
-		}
-		SCursor(1,1);
-	} else if((p=checkstring(cmdline,(unsigned char *)"VBOX"))){
-		int fc=gui_fcolour;
-		bool dual=false;
-		getcsargs(&p,13);
-		if(argc<9)SyntaxError();;
-		int x=getint(argv[0],0,framex-1);
-		int y=getint(argv[2],0,framey-1);
-		int w=getint(argv[4],1,framex-1-x);
-		int h=getint(argv[6],1,framey-1-y);
-		int h2=getint(argv[8],1,framey-1-y-h);
-		if(argc>=11 && *argv[10])fc=getint(argv[10],0,WHITE);
-		if(argc==13){
-			if(checkstring(argv[12],(unsigned char *)"DOUBLE"))dual=true;
-		}
-		fc=RGB121(fc);
-		framewritechar(x,y,dual ? c_d_topleft : c_d_topleft,fc,0);
-		framewritechar(x+w,y,dual ? c_d_topright : c_d_topright,fc,0);
-		framewritechar(x+w,y+h,dual ? c_d_tright : c_d_tright,fc,0);
-		framewritechar(x+w,y+h+h2,dual ? c_d_bottomright : c_d_bottomright,fc,0);
-		framewritechar(x,y+h+h2,dual ? c_d_bottomleft : c_d_bottomleft,fc,0);
-		framewritechar(x,y+h,dual ? c_d_tleft : c_d_tleft,fc,0);
-		for(int i=x+1;i<x+w;i++){
-			framewritechar(i,y,dual ? c_d_horizontal : c_d_horizontal,fc,0);
-			framewritechar(i,y+h,dual ? c_d_horizontal : c_d_horizontal,fc,0);
-			framewritechar(i,y+h+h2,dual ? c_d_horizontal : c_d_horizontal,fc,0);
-		}
-		for(int i=y+1;i<y+h;i++){
-			framewritechar(x,i,dual ? c_d_vertical : c_d_vertical,fc,0);
-			framewritechar(x+w,i,dual ? c_d_vertical : c_d_vertical,fc,0);
-		}
-		for(int i=y+1+h;i<y+h+h2;i++){
-			framewritechar(x,i,dual ? c_d_vertical : c_d_vertical,fc,0);
-			framewritechar(x+w,i,dual ? c_d_vertical : c_d_vertical,fc,0);
-		}
-		SCursor(1,1);
-	} else if((p=checkstring(cmdline,(unsigned char *)"HBOX"))){
-		int fc=gui_fcolour;
-		bool dual=false;
-		getcsargs(&p,13);
-		if(argc<9)SyntaxError();;
-		int x=getint(argv[0],0,framex-1);
-		int y=getint(argv[2],0,framey-1);
-		int w=getint(argv[4],1,framex-1-x);
-		int w2=getint(argv[6],1,framex-1-x-w);
-		int h=getint(argv[8],1,framey-1-y);
-		if(argc>=11 && *argv[10])fc=getint(argv[10],0,WHITE);
-		if(argc==13){
-			if(checkstring(argv[12],(unsigned char *)"DOUBLE"))dual=true;
-		}
-		fc=RGB121(fc);
-		framewritechar(x,y,dual ? c_d_topleft : c_topleft,fc,0);
-		framewritechar(x+w,y,dual ? c_d_tdown : c_tdown,fc,0);
-		framewritechar(x+w,y+h,dual ? c_d_tup : c_tup,fc,0);
-		framewritechar(x+w+w2,y,dual ? c_d_topright : c_topright,fc,0);
-		framewritechar(x+w+w2,y+h,dual ? c_d_bottomright : c_bottomright,fc,0);
-		framewritechar(x,y+h,dual ? c_d_bottomleft : c_bottomleft,fc,0);
-		for(int i=x+1;i<x+w;i++){
-			framewritechar(i,y,dual ? c_d_horizontal : c_horizontal,fc,0);
-			framewritechar(i,y+h,dual ? c_d_horizontal : c_horizontal,fc,0);
-		}
-		for(int i=x+1+w;i<x+w+w2;i++){
-			framewritechar(i,y,dual ? c_d_horizontal : c_horizontal,fc,0);
-			framewritechar(i,y+h,dual ? c_d_horizontal : c_horizontal,fc,0);
-		}
-		for(int i=y+1;i<y+h;i++){
-			framewritechar(x,i,dual ? c_d_vertical : c_vertical,fc,0);
-			framewritechar(x+w,i,dual ? c_d_vertical : c_vertical,fc,0);
-			framewritechar(x+w+w2,i,dual ? c_d_vertical : c_vertical,fc,0);
-		}
-		SCursor(1,1);
-	} else if((p=checkstring(cmdline,(unsigned char *)"CLEAR"))){
-		memset(frame,0,framex*framey*sizeof(uint16_t));
-	} else if((p=checkstring(cmdline,(unsigned char *)"CLOSE"))){
-		if(!frame)error("Frame does not exist");
+	memset(&np[num_panels], 0, (newmax - num_panels) * sizeof(FramePanel));
+	framepanels = np;
+	max_panels = newmax;
+}
+
+static void MIPS16 free_overlays(void)
+{
+	for (int i = 0; i < num_overlays; i++)
+	{
+		FreeMemorySafe((void **)&frame_overlays[i].buffer);
+	}
+	FreeMemorySafe((void **)&frame_overlays);
+	num_overlays = 0;
+	max_overlays = 0;
+	overlay_zcounter = 0;
+}
+
+static FrameOverlay MIPS16 *find_overlay_by_panel(int panel_id)
+{
+	for (int i = 0; i < num_overlays; i++)
+	{
+		if (frame_overlays[i].panel_id == panel_id)
+			return &frame_overlays[i];
+	}
+	return NULL;
+}
+
+void MIPS16 closeframe(void)
+{
+	free_overlays();
+	// Free any vbufs
+	for (int i = 0; i < num_panels; i++)
+	{
+		if (framepanels[i].vbuf)
+			FreeMemorySafe((void **)&framepanels[i].vbuf);
+	}
+	if (frame)
+	{
 		FreeMemorySafe((void **)&frame);
 		FreeMemorySafe((void **)&outframe);
-	} else if((p=checkstring(cmdline,(unsigned char *)"SCROLL"))){
-		int xstart=0,ystart=0,xend=framex-1,yend=framey-1, xmax=framex-1, ymax=framey-1;
-		getcsargs(&p,11);
-//		if(argc<7)SyntaxError();;
-		int xs=getint(argv[0],-(xmax),xmax);
-		int ys=getint(argv[2],-(ymax),ymax);
-		if(argc>=5 && *argv[4])xstart=getint(argv[4],0,xmax);
-		if(argc>=7 && *argv[6])ystart=getint(argv[6],0,ymax);
-		if(argc>=9 && *argv[8])xend=getint(argv[8],1,xmax);
-		if(argc==11)yend=getint(argv[10],1,ymax);
-		SCursor(xstart,ystart);
-		if(DISPLAY_TYPE==SCREENMODE1)tilefcols[ystart*X_TILE+xstart]=RGB;
-		if(abs(xs)>=0){
-			for(int y=ystart;y<=yend;y++){
-				uint16_t *line=&frame[y*framex];
-				if(xs>0){
-					memmove((uint8_t*)&line[xstart+xs],(uint8_t*)&line[xstart],(xend-xstart-xs+1)*sizeof(uint16_t));
-					memset((uint8_t*)&line[xstart],0,xs*sizeof(uint16_t));
-				} else {
-					memmove((uint8_t*)&line[xstart],(uint8_t*)&line[xstart-xs],(xend-xstart+xs+1)*sizeof(uint16_t));
-					memset((uint8_t*)&line[xend+xs+1],0,abs(xs)*sizeof(uint16_t));
-				}
-			}
-		}
-		if(ys>0){
-			uint16_t *line1=&frame[(yend)*framex+xstart];
-			uint16_t *line2=&frame[(yend-ys)*framex+xstart];
-			for(int y=yend;y>ystart-ys+1;y--){
-				memcpy((uint8_t*)line1,(uint8_t*)line2,(xend-xstart+1)*sizeof(uint16_t));
-				line1-=framex;
-				line2-=framex;
-			}
-			line1=&frame[ystart*framex+xstart];
-			for(int y=ystart;y<ystart+ys;y++){
-				memset((uint8_t*)line1,0,(xend-xstart+1)*sizeof(uint16_t));
-				line1+=framex;
-			}
-		} else if(ys<0){
-			ys=-ys;
-			uint16_t *line1=&frame[ystart*framex+xstart];
-			uint16_t *line2=&frame[(ystart+ys)*framex+xstart];
-			for(int y=ystart;y<=yend-ys;y++){
-				memcpy((uint8_t*)line1,(uint8_t*)line2,(xend-xstart+1)*sizeof(uint16_t));
-				line1+=framex;
-				line2+=framex;
-			}
-			line1=&frame[(yend-ys+1)*framex+xstart];
-			for(int y=yend-ys+1;y<=yend;y++){
-				memset((uint8_t*)line1,0,(xend-xstart+1)*sizeof(uint16_t));
-				line1+=framex;
-			}
-		}
-	} else if((p=checkstring(cmdline,(unsigned char *)"WRITE"))){
-		int savefcol=gui_fcolour;
-		int lasty=-1,lastx=-1,lastc=-1;
-		int sx=CurrentX/gui_font_width,sy=CurrentY/gui_font_height;
-		int ccursor=framecursor;
-		framecursor=0;
-		ShowCursor(0);
-		SColour(gui_bcolour,0);
-		for(int y=0;y<framey;y++){
-			for(int x=0;x<framex;x++){
-				uint16_t c=framegetchar(x,y);
-				if(c!=outframe[(y*framex)+x]){
-					outframe[(y*framex)+x]=c;
-					if(y!=lasty || x!=lastx){
-						SCursor(x,y);
-						lastx=x+1;
-						lasty=y;
-					} else lastx=x+1;
-					int outc=colours[(c>>8) & 0xF];
-					if(outc!=lastc){
-						lastc=outc;
-						SColour(outc,1);
-					}
-					if(c==0)c=' ';
-					DisplayPutC(c&0xFF);
-					SerialConsolePutC(c&0xFF,0);
-				}
-			}
-		}
-		//fflush(stdout);         tud_cdc_write_flush();
-#endif
-		gui_fcolour=savefcol;
-		SCursor(sx,sy);
-		framecursor=ccursor;
-		ShowCursor(framecursor);
-		if(DISPLAY_TYPE==SCREENMODE1)tilefcols[sy*X_TILE+sx]=Option.VGAFC;
-		SColour(gui_fcolour,1);
-	} else {
-		int attributes=0, fc=gui_fcolour;
-		getcsargs(&cmdline,9);
-		if(argc<5)SyntaxError();;
-		int x=getint(argv[0],0,framex-1);
-		int y=getint(argv[2],0,framey-1);
-		p=getCstring(argv[4]);
-		if(argc>=7 && *argv[6])fc=getint(argv[6],0,WHITE);
-		if(argc==9)attributes=getint(argv[8],0,15);
-		int l=strlen((char *)p);
-		fc=RGB121(fc);
-		while(l--){
-			if(x==framex){y++;x=0;}
-			if(y==framey)return;
-			framewritechar(x++,y,*p++,fc,attributes);
+	}
+	FreeMemorySafe((void **)&framepanels);
+	num_panels = 0;
+	max_panels = 0;
+	framex = 0;
+	framey = 0;
+	framecursor_on = false;
+	frame_last_panel = 0;
+	lcd_cursor_active = false;
+	lcd_cursor_x = -1;
+	lcd_cursor_y = -1;
+	lcd_cursor_blink_time = 0;
+	lcd_cursor_blink_on = false;
+}
+
+static inline void framewritechar_to(uint16_t *buf, int stride, int x, int y, uint8_t ascii, uint8_t fcolour, uint8_t bcolour)
+{
+	buf[(y * stride) + x] = ascii | (fcolour << 8) | (bcolour << 12);
+}
+
+static inline void framewritechar(int x, int y, uint8_t ascii, uint8_t fcolour, uint8_t bcolour)
+{
+	if (x < 0 || x >= framex || y < 0 || y >= framey)
+		return;
+	frame[(y * framex) + x] = ascii | (fcolour << 8) | (bcolour << 12);
+}
+
+static inline uint16_t framegetchar(int x, int y)
+{
+	return frame[(y * framex) + x];
+}
+
+// Draw a single cell to LCD ONLY at screen position (x,y) with given cell value.
+// Does NOT touch serial output at all.
+static void MIPS16 frame_draw_cell_at(int x, int y, uint16_t cell)
+{
+	int ch = cell & 0xFF;
+	if (ch == 0)
+		ch = ' ';
+	// Save and restore gui colours so we don't corrupt serial state
+	int save_fc = gui_fcolour, save_bc = gui_bcolour;
+	gui_fcolour = colours[(cell >> 8) & 0xF];
+	gui_bcolour = colours[(cell >> 12) & 0xF];
+	CurrentX = x * gui_font_width;
+	CurrentY = y * gui_font_height;
+	DisplayPutC(ch);
+	gui_fcolour = save_fc;
+	gui_bcolour = save_bc;
+}
+
+// Restore the cell under the LCD cursor to its normal (non-inverted) state.
+static void MIPS16 frame_restore_lcd_cursor(void)
+{
+	if (!lcd_cursor_active || !outframe)
+		return;
+	if (lcd_cursor_x < 0 || lcd_cursor_x >= framex ||
+		lcd_cursor_y < 0 || lcd_cursor_y >= framey)
+	{
+		lcd_cursor_active = false;
+		return;
+	}
+	uint16_t cell = outframe[lcd_cursor_y * framex + lcd_cursor_x];
+	frame_draw_cell_at(lcd_cursor_x, lcd_cursor_y, cell);
+	lcd_cursor_active = false;
+}
+
+// Draw the LCD cursor by inverting fg/bg at the given screen position.
+static void MIPS16 frame_draw_lcd_cursor(int x, int y)
+{
+	if (!outframe || x < 0 || x >= framex || y < 0 || y >= framey)
+		return;
+	uint16_t cell = outframe[y * framex + x];
+	// Swap fg (bits 8-11) and bg (bits 12-15)
+	int fg = (cell >> 8) & 0xF;
+	int bg = (cell >> 12) & 0xF;
+	// If fg == bg, inversion would be invisible; force a visible contrast
+	if (fg == bg)
+	{
+		fg = (bg == 0xF) ? 0 : 0xF; // white on black, or black on white
+	}
+	int ch = cell & 0xFF;
+	if (ch == 0)
+		ch = ' ';
+	uint16_t inverted = ch | (bg << 8) | (fg << 12);
+	frame_draw_cell_at(x, y, inverted);
+	lcd_cursor_x = x;
+	lcd_cursor_y = y;
+	lcd_cursor_active = true;
+}
+
+// Toggle cursor blink at screen position (x,y) using time_us_64().
+// Handles both LCD (invert/restore) and serial (show/hide) cursors.
+// Call repeatedly from wait loops; it returns immediately if not time to toggle yet.
+static void MIPS16 frame_blink_cursor(int screen_x, int screen_y)
+{
+	if (!framecursor_on)
+		return;
+	uint64_t now = time_us_64();
+	if (now - lcd_cursor_blink_time < CURSOR_BLINK_US)
+		return;
+	lcd_cursor_blink_time = now;
+	lcd_cursor_blink_on = !lcd_cursor_blink_on;
+	if (lcd_cursor_blink_on)
+	{
+		// Show cursor
+		if (Option.DISPLAY_TYPE)
+			frame_draw_lcd_cursor(screen_x, screen_y);
+		SSPrintString("\033[?25h");
+	}
+	else
+	{
+		// Hide cursor
+		if (Option.DISPLAY_TYPE && lcd_cursor_active)
+			frame_restore_lcd_cursor();
+		SSPrintString("\033[?25l");
+	}
+}
+
+// Get buffer and stride for a panel (overlay or main frame)
+static inline void MIPS16 panel_buf(FramePanel *pnl, uint16_t **buf, int *stride)
+{
+	if (pnl->vbuf)
+	{
+		// Virtual buffer: all writes go here
+		*buf = pnl->vbuf;
+		*stride = pnl->vw;
+	}
+	else if (pnl->buffer)
+	{
+		*buf = pnl->buffer;
+		*stride = pnl->buf_stride;
+	}
+	else
+	{
+		*buf = frame;
+		*stride = framex;
+	}
+}
+
+// Get the write origin and dimensions for a panel.
+// For vbuf panels, writes target the full virtual buffer at (0,0).
+// For normal panels, writes target the panel interior in the frame/overlay buffer.
+static inline void panel_write_geometry(FramePanel *pnl, int *ox, int *oy, int *pw, int *ph)
+{
+	if (pnl->vbuf)
+	{
+		*ox = 0;
+		*oy = 0;
+		*pw = pnl->vw;
+		*ph = pnl->vh;
+	}
+	else
+	{
+		*ox = pnl->x1;
+		*oy = pnl->y1;
+		*pw = pnl->x2 - pnl->x1 + 1;
+		*ph = pnl->y2 - pnl->y1 + 1;
+	}
+}
+
+// Get the border/frame buffer (overlay buffer or main frame), bypassing vbuf.
+// Used for operations that modify the border/decoration area (TITLE, HLINE).
+static inline void MIPS16 panel_border_buf(FramePanel *pnl, uint16_t **buf, int *stride)
+{
+	if (pnl->buffer)
+	{
+		*buf = pnl->buffer;
+		*stride = pnl->buf_stride;
+	}
+	else
+	{
+		*buf = frame;
+		*stride = framex;
+	}
+}
+
+// Flush the visible viewport of a vbuf panel into the main frame or overlay buffer.
+static void MIPS16 panel_flush_vbuf(FramePanel *pnl)
+{
+	if (!pnl->vbuf)
+		return;
+	int pw = pnl->x2 - pnl->x1 + 1; // visible width
+	int ph = pnl->y2 - pnl->y1 + 1; // visible height
+	// Determine destination buffer (main frame or overlay)
+	uint16_t *dst;
+	int dstride;
+	if (pnl->buffer)
+	{
+		dst = pnl->buffer;
+		dstride = pnl->buf_stride;
+	}
+	else
+	{
+		dst = frame;
+		dstride = framex;
+	}
+	for (int vy = 0; vy < ph; vy++)
+	{
+		int src_y = pnl->sy + vy;
+		int dst_y = pnl->y1 + vy;
+		for (int vx = 0; vx < pw; vx++)
+		{
+			int src_x = pnl->sx + vx;
+			uint16_t cell;
+			if (src_x >= 0 && src_x < pnl->vw && src_y >= 0 && src_y < pnl->vh)
+				cell = pnl->vbuf[src_y * pnl->vw + src_x];
+			else
+				cell = ' ' | ((uint16_t)pnl->default_fc << 8) | ((uint16_t)pnl->default_bc << 12);
+			dst[dst_y * dstride + (pnl->x1 + vx)] = cell;
 		}
 	}
-}*/
+}
+
+// Lightweight cursor positioning â€” updates CurrentX/Y and sends VT100 position.
+// Does NOT toggle the VGA or serial cursor visibility, so safe to use during rendering.
+static void MIPS16 SMoveCursor(int x, int y)
+{
+	char s[30];
+	CurrentX = x * gui_font_width;
+	CurrentY = y * gui_font_height;
+	sprintf(s, "\033[%d;%dH", y + 1, x + 1);
+	SSPrintString(s);
+}
+
+// Map RGB121 4-bit colour index to ANSI foreground SGR code (30-37, 90-97).
+// Background codes are foreground + 10 (40-47, 100-107).
+static const uint8_t rgb121_to_ansi[16] = {
+	30, // 0:  BLACK
+	34, // 1:  BLUE
+	32, // 2:  MYRTLE        -> green
+	36, // 3:  COBALT        -> cyan
+	32, // 4:  MIDGREEN      -> green
+	94, // 5:  CERULEAN      -> bright blue
+	92, // 6:  GREEN         -> bright green
+	96, // 7:  CYAN          -> bright cyan
+	31, // 8:  RED
+	35, // 9:  MAGENTA
+	33, // 10: RUST          -> yellow
+	95, // 11: FUCHSIA       -> bright magenta
+	93, // 12: BROWN         -> bright yellow
+	95, // 13: LILAC         -> bright magenta
+	93, // 14: YELLOW        -> bright yellow
+	97	// 15: WHITE         -> bright white
+};
+
+static void MIPS16 SColour(int colour, int fore)
+{
+	char s[12];
+	int code = rgb121_to_ansi[RGB121(colour) & 0xF];
+	if (!fore)
+		code += 10; // background offset: 40-47, 100-107
+	if (fore)
+		gui_fcolour = colour;
+	else
+		gui_bcolour = colour;
+	sprintf(s, "\033[%dm", code);
+	SSPrintString(s);
+}
+
+// Draw a box grid with cols x rows subdivisions and register each cell as a panel.
+// x, y: top-left corner of outer box (char coords)
+// w, h: outer box span â€” right border at x+w, bottom at y+h
+// Interior per column = (w - cols) / cols chars (remainder spread across first columns)
+// Interior per row    = (h - rows) / rows chars
+static void MIPS16 draw_grid_box(int x, int y, int w, int h, int cols, int rows, int fc, bool dual)
+{
+	int *col_pos = (int *)GetMemory((cols + 2) * sizeof(int));
+	int *row_pos = (int *)GetMemory((rows + 2) * sizeof(int));
+	int base_cw = (w - cols) / cols;
+	int col_rem = (w - cols) % cols;
+	col_pos[0] = 0;
+	for (int i = 0; i < cols; i++)
+	{
+		int cw = base_cw + (i < col_rem ? 1 : 0);
+		col_pos[i + 1] = col_pos[i] + cw + 1;
+	}
+	int base_rh = (h - rows) / rows;
+	int row_rem = (h - rows) % rows;
+	row_pos[0] = 0;
+	for (int i = 0; i < rows; i++)
+	{
+		int rh = base_rh + (i < row_rem ? 1 : 0);
+		row_pos[i + 1] = row_pos[i] + rh + 1;
+	}
+	// Draw horizontal lines and junction characters
+	for (int r = 0; r <= rows; r++)
+	{
+		int yy = y + row_pos[r];
+		for (int c = 0; c <= cols; c++)
+		{
+			int xx = x + col_pos[c];
+			int ch;
+			if (r == 0 && c == 0)
+				ch = dual ? c_d_topleft : c_topleft;
+			else if (r == 0 && c == cols)
+				ch = dual ? c_d_topright : c_topright;
+			else if (r == rows && c == 0)
+				ch = dual ? c_d_bottomleft : c_bottomleft;
+			else if (r == rows && c == cols)
+				ch = dual ? c_d_bottomright : c_bottomright;
+			else if (r == 0)
+				ch = dual ? c_d_tdown : c_tdown;
+			else if (r == rows)
+				ch = dual ? c_d_tup : c_tup;
+			else if (c == 0)
+				ch = dual ? c_d_tleft : c_tleft;
+			else if (c == cols)
+				ch = dual ? c_d_tright : c_tright;
+			else
+				ch = dual ? c_d_cross : c_cross;
+			framewritechar(xx, yy, ch, fc, 0);
+		}
+		for (int c = 0; c < cols; c++)
+		{
+			for (int xx = x + col_pos[c] + 1; xx < x + col_pos[c + 1]; xx++)
+			{
+				framewritechar(xx, yy, dual ? c_d_horizontal : c_horizontal, fc, 0);
+			}
+		}
+	}
+	// Draw vertical lines between rows
+	for (int r = 0; r < rows; r++)
+	{
+		for (int yy = y + row_pos[r] + 1; yy < y + row_pos[r + 1]; yy++)
+		{
+			for (int c = 0; c <= cols; c++)
+			{
+				framewritechar(x + col_pos[c], yy, dual ? c_d_vertical : c_vertical, fc, 0);
+			}
+		}
+	}
+	// Register panels (row-major order: left-to-right, top-to-bottom)
+	ensure_panels(num_panels + cols * rows);
+	for (int r = 0; r < rows; r++)
+	{
+		for (int c = 0; c < cols; c++)
+		{
+			framepanels[num_panels].x1 = x + col_pos[c] + 1;
+			framepanels[num_panels].y1 = y + row_pos[r] + 1;
+			framepanels[num_panels].x2 = x + col_pos[c + 1] - 1;
+			framepanels[num_panels].y2 = y + row_pos[r + 1] - 1;
+			framepanels[num_panels].cx = 0;
+			framepanels[num_panels].cy = 0;
+			framepanels[num_panels].active = true;
+			framepanels[num_panels].default_fc = RGB121(gui_fcolour);
+			framepanels[num_panels].default_bc = 0;
+			num_panels++;
+		}
+	}
+	FreeMemorySafe((void **)&col_pos);
+	FreeMemorySafe((void **)&row_pos);
+}
+
+// Render frame buffer to screen with overlay compositing (differential update).
+// Hides serial cursor only if cells change. Does NOT touch VGA cursor.
+// Returns 1 if any cells were updated, 0 if not.
+// Caller must ensure Option.DISPLAY_CONSOLE is set before calling if VGA output is needed.
+static int MIPS16 frame_render(void)
+{
+	// Flush vbuf panels: copy the visible viewport into the main frame/overlay buffer
+	for (int pi = 0; pi < num_panels; pi++)
+	{
+		if (framepanels[pi].active && framepanels[pi].vbuf)
+			panel_flush_vbuf(&framepanels[pi]);
+	}
+
+	int savefcol = gui_fcolour;
+	int lasty = -1, lastx = -1, lastc = -1, lastbc = -1;
+	int changed = 0;
+	for (int y = 0; y < framey; y++)
+	{
+		for (int x = 0; x < framex; x++)
+		{
+			// Start with main frame content
+			uint16_t c = framegetchar(x, y);
+			// Composite visible overlays (highest z-order wins)
+			int best_z = -1;
+			for (int oi = 0; oi < num_overlays; oi++)
+			{
+				FrameOverlay *ov = &frame_overlays[oi];
+				if (!ov->visible)
+					continue;
+				if (x >= ov->ox && x < ov->ox + ov->width &&
+					y >= ov->oy && y < ov->oy + ov->height)
+				{
+					if (ov->zorder > best_z)
+					{
+						best_z = ov->zorder;
+						int lx = x - ov->ox, ly = y - ov->oy;
+						c = ov->buffer[ly * ov->width + lx];
+					}
+				}
+			}
+			if (c != outframe[(y * framex) + x])
+			{
+				if (!changed)
+				{
+					// First change: hide serial cursor during render
+					SSPrintString("\033[?25l");
+					changed = 1;
+				}
+				outframe[(y * framex) + x] = c;
+				if (y != lasty || x != lastx)
+				{
+					SMoveCursor(x, y);
+					lastx = x + 1;
+					lasty = y;
+				}
+				else
+					lastx = x + 1;
+				int outc = colours[(c >> 8) & 0xF];
+				if (outc != lastc)
+				{
+					lastc = outc;
+					SColour(outc, 1);
+				}
+				int outbc = colours[(c >> 12) & 0xF];
+				if (outbc != lastbc)
+				{
+					lastbc = outbc;
+					SColour(outbc, 0);
+				}
+				{
+					int ch = c & 0xFF;
+					if (ch == 0)
+						ch = ' ';
+					DisplayPutC(ch);
+					SerialConsolePutC(ch, 0);
+				}
+			}
+		}
+	}
+	if (changed)
+	{
+		gui_fcolour = savefcol;
+		SColour(gui_fcolour, 1);
+		SColour(gui_bcolour, 0);
+	}
+	return changed;
+}
+
+void MIPS16 cmd_frame(void)
+{
+	unsigned char *p = NULL;
+	if ((p = checkstring(cmdline, (unsigned char *)"CREATE")))
+	{
+		if (frame)
+			error("Frame already exists");
+		framex = HRes / gui_font_width;
+		framey = VRes / gui_font_height;
+		frame = (uint16_t *)GetMemory(framex * framey * sizeof(uint16_t));
+		outframe = (uint16_t *)GetMemory(framex * framey * sizeof(uint16_t));
+		for (int i = 0; i < framex * framey; i++)
+			outframe[i] = 0xFFFF;
+		num_panels = 0;
+		max_panels = 0;
+		FreeMemorySafe((void **)&framepanels);
+		Option.Width = framex;
+		Option.Height = framey;
+		char sp[20] = {0};
+		strcpy(sp, "\033[8;");
+		IntToStr(&sp[strlen(sp)], framey, 10);
+		strcat(sp, ";");
+		IntToStr(&sp[strlen(sp)], framex + 1, 10);
+		strcat(sp, "t");
+		SSPrintString(sp);
+		SSPrintString("\0337\033[2J\033[H");
+		ClearScreen(gui_bcolour);
+		return;
+	}
+	if (!frame)
+		error("Frame not created");
+	if ((p = checkstring(cmdline, (unsigned char *)"CURSOR")))
+	{
+		// FRAME CURSOR ON | OFF | panel_id, x, y
+		if (checkstring(p, (unsigned char *)"ON"))
+		{
+			framecursor_on = true;
+		}
+		else if (checkstring(p, (unsigned char *)"OFF"))
+		{
+			framecursor_on = false;
+			SSPrintString("\033[?25l"); // hide serial cursor
+			if (Option.DISPLAY_TYPE && lcd_cursor_active)
+			{
+				unsigned char sc = Option.DISPLAY_CONSOLE;
+				Option.DISPLAY_CONSOLE = 1;
+				frame_restore_lcd_cursor();
+				SColour(gui_fcolour, 1);
+				SColour(gui_bcolour, 0);
+				Option.DISPLAY_CONSOLE = sc;
+			}
+		}
+		else
+		{
+			// FRAME CURSOR panel_id, x, y â€” set the logical cursor position in a panel
+			getcsargs(&p, 5);
+			volatile int nargs = argc;
+			if (nargs < 5)
+				SyntaxError();
+			int panel_id = getint(argv[0], 1, num_panels);
+			if (!framepanels[panel_id - 1].active)
+				error("Panel not active");
+			FramePanel *pnl = &framepanels[panel_id - 1];
+			int pw = pnl->vbuf ? pnl->vw : (pnl->x2 - pnl->x1 + 1);
+			int ph = pnl->vbuf ? pnl->vh : (pnl->y2 - pnl->y1 + 1);
+			int cx = getint(argv[2], 0, pw - 1);
+			int cy = getint(argv[4], 0, ph - 1);
+			pnl->cx = cx;
+			pnl->cy = cy;
+		}
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"BOX")))
+	{
+		// FRAME BOX x, y, w, h [, cols, rows [, fc [, DOUBLE]]]
+		// Draws a grid box with cols x rows panels and registers each panel.
+		// cols and rows default to 1 (simple box).
+		// Panel IDs are assigned sequentially starting from the next available ID.
+		int fc = gui_fcolour;
+		int cols = 1, rows = 1;
+		bool dual = false;
+		getcsargs(&p, 17);
+		if (argc < 7)
+			SyntaxError();
+		int x = getint(argv[0], 0, framex - 1);
+		int y = getint(argv[2], 0, framey - 1);
+		int w = getint(argv[4], 2, framex - 1 - x);
+		int h = getint(argv[6], 2, framey - 1 - y);
+		if (argc >= 9 && *argv[8])
+			cols = getint(argv[8], 1, framex);
+		if (argc >= 11 && *argv[10])
+			rows = getint(argv[10], 1, framey);
+		if (argc >= 13 && *argv[12])
+			fc = getint(argv[12], 0, WHITE);
+		if (argc >= 15 && *argv[14])
+		{
+			if (checkstring(argv[14], (unsigned char *)"DOUBLE"))
+				dual = true;
+		}
+		if (w < 2 * cols)
+			error("Box too narrow");
+		if (h < 2 * rows)
+			error("Box too short");
+
+		fc = RGB121(fc);
+		draw_grid_box(x, y, w, h, cols, rows, fc, dual);
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"TITLE")))
+	{
+		// FRAME TITLE panel_id, text$ [, colour]
+		// Centres text in the top border of the panel or overlay.
+		getcsargs(&p, 5);
+		if (argc < 3)
+			SyntaxError();
+		int panel_id = getint(argv[0], 1, num_panels);
+		if (!framepanels[panel_id - 1].active)
+			error("Panel not active");
+		FramePanel *pnl = &framepanels[panel_id - 1];
+		unsigned char *text = getCstring(argv[2]);
+		int tfc;
+		if (argc >= 5 && *argv[4])
+			tfc = RGB121(getint(argv[4], 0, WHITE));
+		else
+			tfc = pnl->default_fc;
+		int tbc = pnl->default_bc;
+		int tlen = strlen((char *)text);
+		int pw = pnl->x2 - pnl->x1 + 1;
+		if (tlen > pw - 2)
+			tlen = pw - 2;
+		int start = (pw - tlen) / 2;
+		uint16_t *tbuf;
+		int tstride;
+		panel_border_buf(pnl, &tbuf, &tstride);
+		int border_y = pnl->y1 - 1;
+		// Detect border style from top-left corner
+		uint16_t corner = tbuf[border_y * tstride + (pnl->x1 - 1)];
+		bool is_double = ((corner & 0xFF) == c_d_topleft);
+		// Write bracket-text-bracket into the border row
+		int bx = pnl->x1 + start - 1;
+		if (bx >= pnl->x1)
+			framewritechar_to(tbuf, tstride, bx, border_y,
+							  is_double ? c_ds_tright : c_tright, tfc, tbc);
+		for (int i = 0; i < tlen; i++)
+			framewritechar_to(tbuf, tstride, pnl->x1 + start + i, border_y,
+							  text[i], tfc, tbc);
+		bx = pnl->x1 + start + tlen;
+		if (bx <= pnl->x2)
+			framewritechar_to(tbuf, tstride, bx, border_y,
+							  is_double ? c_ds_tleft : c_tleft, tfc, tbc);
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"HLINE")))
+	{
+		// FRAME HLINE panel_id, row [, colour [, DOUBLE]]
+		// Draws a horizontal divider across the panel at the given row,
+		// with T-junction characters connecting to the left and right borders.
+		int hfc = gui_fcolour;
+		bool hdual = false;
+		getcsargs(&p, 7);
+		if (argc < 3)
+			SyntaxError();
+		int panel_id = getint(argv[0], 1, num_panels);
+		if (!framepanels[panel_id - 1].active)
+			error("Panel not active");
+		FramePanel *pnl = &framepanels[panel_id - 1];
+		int ph = pnl->y2 - pnl->y1 + 1;
+		int row = getint(argv[2], 0, ph - 1);
+		if (argc >= 5 && *argv[4])
+			hfc = getint(argv[4], 0, WHITE);
+		if (argc >= 7 && *argv[6])
+		{
+			if (checkstring(argv[6], (unsigned char *)"DOUBLE"))
+				hdual = true;
+		}
+		hfc = RGB121(hfc);
+		uint16_t *hbuf;
+		int hstride;
+		panel_border_buf(pnl, &hbuf, &hstride);
+		int hy = pnl->y1 + row;
+		int hbc = pnl->default_bc;
+		// Detect border style from top-left corner
+		uint16_t corner = hbuf[(pnl->y1 - 1) * hstride + (pnl->x1 - 1)];
+		bool border_double = ((corner & 0xFF) == c_d_topleft);
+		// Left junction
+		int lch, rch;
+		if (border_double && hdual)
+		{
+			lch = c_d_tleft;
+			rch = c_d_tright;
+		}
+		else if (border_double && !hdual)
+		{
+			lch = c_sd_tleft;
+			rch = c_sd_tright;
+		}
+		else if (!border_double && hdual)
+		{
+			lch = c_ds_tleft;
+			rch = c_ds_tright;
+		}
+		else
+		{
+			lch = c_tleft;
+			rch = c_tright;
+		}
+		framewritechar_to(hbuf, hstride, pnl->x1 - 1, hy, lch, hfc, hbc);
+		framewritechar_to(hbuf, hstride, pnl->x2 + 1, hy, rch, hfc, hbc);
+		for (int hx = pnl->x1; hx <= pnl->x2; hx++)
+			framewritechar_to(hbuf, hstride, hx, hy, hdual ? c_d_horizontal : c_horizontal, hfc, hbc);
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"PRINT")))
+	{
+		// FRAME PRINT panel_id, text$ [, fc [, WRAP]]
+		// Writes text into the specified panel, advancing the panel's cursor.
+		// Without WRAP: text that exceeds the panel width is clipped (discarded).
+		// With WRAP:    text wraps to the next line within the panel.
+		// Newline characters (\n) move to the start of the next line within the panel.
+		bool wrap = false;
+		getcsargs(&p, 7);
+		if (argc < 3)
+			SyntaxError();
+		int panel_id = getint(argv[0], 1, num_panels);
+		if (!framepanels[panel_id - 1].active)
+			error("Panel not active");
+		frame_last_panel = panel_id; // track for FRAME CURSOR ON
+		FramePanel *pnl = &framepanels[panel_id - 1];
+		p = getCstring(argv[2]);
+		int fc;
+		if (argc >= 5 && *argv[4])
+			fc = RGB121(getint(argv[4], 0, WHITE));
+		else
+			fc = pnl->default_fc;
+		int bc = pnl->default_bc;
+		if (argc >= 7 && *argv[6])
+		{
+			if (checkstring(argv[6], (unsigned char *)"WRAP"))
+				wrap = true;
+		}
+		uint16_t *pbuf;
+		int pstride;
+		panel_buf(pnl, &pbuf, &pstride);
+		int ox, oy, pw, ph;
+		panel_write_geometry(pnl, &ox, &oy, &pw, &ph);
+		uint16_t bgfill = ' ' | ((uint16_t)fc << 8) | ((uint16_t)bc << 12);
+		while (*p)
+		{
+			if (pnl->cy >= ph)
+			{
+				if (wrap)
+				{
+					// Auto-scroll: shift panel contents up one line
+					for (int sy = 1; sy < ph; sy++)
+					{
+						memcpy((uint8_t *)&pbuf[(oy + sy - 1) * pstride + ox],
+							   (uint8_t *)&pbuf[(oy + sy) * pstride + ox],
+							   pw * sizeof(uint16_t));
+					}
+					// Clear the bottom line with background colour
+					for (int fx = 0; fx < pw; fx++)
+						pbuf[(oy + ph - 1) * pstride + ox + fx] = bgfill;
+					pnl->cy = ph - 1;
+					pnl->cx = 0;
+				}
+				else
+					break;
+			}
+			if (*p == '\n')
+			{
+				pnl->cx = 0;
+				pnl->cy++;
+				p++;
+				continue;
+			}
+			if (*p == '\r')
+			{
+				pnl->cx = 0;
+				p++;
+				continue;
+			}
+			if (pnl->cx >= pw)
+			{
+				if (wrap)
+				{
+					pnl->cx = 0;
+					pnl->cy++;
+					if (pnl->cy >= ph)
+					{
+						// Auto-scroll: shift panel contents up one line
+						for (int sy = 1; sy < ph; sy++)
+						{
+							memcpy((uint8_t *)&pbuf[(oy + sy - 1) * pstride + ox],
+								   (uint8_t *)&pbuf[(oy + sy) * pstride + ox],
+								   pw * sizeof(uint16_t));
+						}
+						for (int fx = 0; fx < pw; fx++)
+							pbuf[(oy + ph - 1) * pstride + ox + fx] = bgfill;
+						pnl->cy = ph - 1;
+					}
+				}
+				else
+				{
+					p++;
+					continue;
+				}
+			}
+			framewritechar_to(pbuf, pstride, ox + pnl->cx, oy + pnl->cy, *p, fc, bc);
+			pnl->cx++;
+			p++;
+		}
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"INPUT")))
+	{
+		// FRAME INPUT panel_id, variable [, prompt$ [, fc]]
+		// Panel-aware line input. Displays optional prompt in the panel,
+		// reads characters from the console echoing them into the panel buffer.
+		// Handles backspace and wrapping. Enter terminates input.
+		// Result is stored in the specified variable (string, integer, or float).
+		// Works with both main-frame panels and visible overlays.
+		getcsargs(&p, 7);
+		if (argc < 3)
+			SyntaxError();
+		int panel_id = getint(argv[0], 1, num_panels);
+		if (!framepanels[panel_id - 1].active)
+			error("Panel not active");
+		FramePanel *pnl = &framepanels[panel_id - 1];
+
+		int fc = pnl->default_fc;
+		int bc = pnl->default_bc;
+
+		// Evaluate optional prompt before findvar
+		unsigned char *prompt = NULL;
+		if (argc >= 5 && *argv[4])
+			prompt = getCstring(argv[4]);
+		if (argc >= 7 && *argv[6])
+			fc = RGB121(getint(argv[6], 0, WHITE));
+
+		// Find the target variable
+		unsigned char *vp = findvar(argv[2], V_FIND);
+		if (g_vartbl[g_VarIndex].type & T_CONST)
+			error("Cannot change a constant");
+		int var_type = g_vartbl[g_VarIndex].type;
+		int var_size = g_vartbl[g_VarIndex].size;
+#ifdef STRUCTENABLED
+		if (g_StructMemberType != 0)
+		{
+			var_type = g_StructMemberType;
+			if (g_StructMemberType & T_STR)
+				var_size = g_StructMemberSize;
+		}
+#endif
+
+		// Get panel buffer info
+		uint16_t *pbuf;
+		int pstride;
+		panel_buf(pnl, &pbuf, &pstride);
+		int ox, oy, pw, ph;
+		panel_write_geometry(pnl, &ox, &oy, &pw, &ph);
+		uint16_t bgfill = ' ' | ((uint16_t)fc << 8) | ((uint16_t)bc << 12);
+
+		// Write prompt into panel if given
+		if (prompt)
+		{
+			while (*prompt)
+			{
+				if (*prompt == '\n')
+				{
+					pnl->cx = 0;
+					pnl->cy++;
+					prompt++;
+					continue;
+				}
+				if (*prompt == '\r')
+				{
+					pnl->cx = 0;
+					prompt++;
+					continue;
+				}
+				if (pnl->cx >= pw)
+				{
+					pnl->cx = 0;
+					pnl->cy++;
+				}
+				if (pnl->cy >= ph)
+				{
+					// Auto-scroll for prompt
+					for (int sy = 1; sy < ph; sy++)
+						memcpy(&pbuf[(oy + sy - 1) * pstride + ox],
+							   &pbuf[(oy + sy) * pstride + ox],
+							   pw * sizeof(uint16_t));
+					for (int fx = 0; fx < pw; fx++)
+						pbuf[(oy + ph - 1) * pstride + ox + fx] = bgfill;
+					pnl->cy = ph - 1;
+					pnl->cx = 0;
+				}
+				framewritechar_to(pbuf, pstride, ox + pnl->cx, oy + pnl->cy, *prompt, fc, bc);
+				pnl->cx++;
+				prompt++;
+			}
+		}
+
+		// Determine overlay (if any) for cursor positioning
+		FrameOverlay *input_ov = find_overlay_by_panel(panel_id);
+
+		// Input loop
+		unsigned char ibuf[STRINGSIZE];
+		int nchars = 0;
+
+		unsigned char save_console = Option.DISPLAY_CONSOLE;
+		if (Option.DISPLAY_TYPE)
+			Option.DISPLAY_CONSOLE = 1;
+
+		while (1)
+		{
+			// Restore old LCD cursor before render so outframe comparison is clean
+			if (lcd_cursor_active && Option.DISPLAY_TYPE)
+				frame_restore_lcd_cursor();
+
+			// Render frame to screen
+			int changed = frame_render();
+
+			// Position cursor at current input position in the panel
+			int screen_x = pnl->x1 + pnl->cx - (pnl->vbuf ? pnl->sx : 0);
+			int screen_y = pnl->y1 + pnl->cy - (pnl->vbuf ? pnl->sy : 0);
+			if (input_ov && input_ov->visible)
+			{
+				screen_x += input_ov->ox;
+				screen_y += input_ov->oy;
+			}
+			SMoveCursor(screen_x, screen_y);
+			if (changed)
+				SSPrintString("\033[?25h");
+
+			// Draw LCD inverted cursor at input position and start blink cycle
+			if (framecursor_on)
+			{
+				if (Option.DISPLAY_TYPE)
+					frame_draw_lcd_cursor(screen_x, screen_y);
+				lcd_cursor_blink_on = true;
+				lcd_cursor_blink_time = time_us_64();
+			}
+
+			// Wait for a key, animating cursor blink
+			int c;
+			do
+			{
+				CheckAbort();
+				frame_blink_cursor(screen_x, screen_y);
+				c = MMInkey();
+			} while (c == -1);
+
+			// Restore cursor to normal before processing key
+			if (lcd_cursor_active && Option.DISPLAY_TYPE)
+				frame_restore_lcd_cursor();
+			if (framecursor_on)
+				SSPrintString("\033[?25l");
+
+			if (c == '\r' || c == '\n')
+				break;
+
+			if (c == '\b' || c == 127)
+			{
+				// Backspace
+				if (nchars > 0)
+				{
+					nchars--;
+					// Move cursor back
+					if (pnl->cx > 0)
+					{
+						pnl->cx--;
+					}
+					else if (pnl->cy > 0)
+					{
+						pnl->cy--;
+						pnl->cx = pw - 1;
+					}
+					// Clear the character at cursor position
+					framewritechar_to(pbuf, pstride, ox + pnl->cx, oy + pnl->cy, ' ', fc, bc);
+				}
+				continue;
+			}
+
+			if (c < ' ' || c > 126)
+				continue; // ignore non-printable / escape sequences
+
+			if (nchars >= MAXSTRLEN)
+				continue; // buffer full
+
+			// Auto-scroll if cursor is past the panel bottom
+			if (pnl->cy >= ph)
+			{
+				for (int sy = 1; sy < ph; sy++)
+					memcpy(&pbuf[(oy + sy - 1) * pstride + ox],
+						   &pbuf[(oy + sy) * pstride + ox],
+						   pw * sizeof(uint16_t));
+				for (int fx = 0; fx < pw; fx++)
+					pbuf[(oy + ph - 1) * pstride + ox + fx] = bgfill;
+				pnl->cy = ph - 1;
+				pnl->cx = 0;
+			}
+
+			// Store character in buffer
+			ibuf[nchars++] = c;
+
+			// Write character to panel at cursor position
+			framewritechar_to(pbuf, pstride, ox + pnl->cx, oy + pnl->cy, c, fc, bc);
+			pnl->cx++;
+			if (pnl->cx >= pw)
+			{
+				pnl->cx = 0;
+				pnl->cy++;
+			}
+		}
+		ibuf[nchars] = 0;
+
+		// Advance cursor to next line after input
+		pnl->cx = 0;
+		pnl->cy++;
+
+		// Restore LCD cursor before final render
+		if (lcd_cursor_active && Option.DISPLAY_TYPE)
+			frame_restore_lcd_cursor();
+
+		// Final render
+		int fchanged = frame_render();
+		int screen_x = pnl->x1 + pnl->cx - (pnl->vbuf ? pnl->sx : 0);
+		int screen_y = pnl->y1 + pnl->cy - (pnl->vbuf ? pnl->sy : 0);
+		if (input_ov && input_ov->visible)
+		{
+			screen_x += input_ov->ox;
+			screen_y += input_ov->oy;
+		}
+		SMoveCursor(screen_x, screen_y);
+		if (fchanged)
+			SSPrintString("\033[?25h");
+
+		// Draw LCD cursor at final position and start blink cycle
+		if (framecursor_on)
+		{
+			if (Option.DISPLAY_TYPE)
+				frame_draw_lcd_cursor(screen_x, screen_y);
+			lcd_cursor_blink_on = true;
+			lcd_cursor_blink_time = time_us_64();
+		}
+
+		Option.DISPLAY_CONSOLE = save_console;
+
+		// Assign to variable
+		if (var_type & T_STR)
+		{
+			if (nchars > var_size)
+				error("String too long");
+			strcpy((char *)vp, (char *)ibuf);
+			CtoM(vp);
+		}
+		else if (var_type & T_INT)
+		{
+			*((long long int *)vp) = strtoll((char *)ibuf, NULL, 10);
+		}
+		else
+		{
+			*((MMFLOAT *)vp) = (MMFLOAT)atof((char *)ibuf);
+		}
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"CLS")))
+	{
+		// FRAME CLS [panel_id]
+		// Without panel_id: clears entire frame buffer, resets all panel cursors.
+		// With panel_id:    clears only that panel's interior and resets its cursor.
+		//                   If the panel has a vbuf, clears the entire virtual buffer.
+		if (*p)
+		{
+			int panel_id = getint(p, 1, num_panels);
+			if (!framepanels[panel_id - 1].active)
+				error("Panel not active");
+			FramePanel *pnl = &framepanels[panel_id - 1];
+			uint16_t fill = ' ' | ((uint16_t)pnl->default_fc << 8) | ((uint16_t)pnl->default_bc << 12);
+			if (pnl->vbuf)
+			{
+				// Clear entire virtual buffer
+				for (int i = 0; i < pnl->vw * pnl->vh; i++)
+					pnl->vbuf[i] = fill;
+			}
+			else
+			{
+				uint16_t *pbuf;
+				int pstride;
+				panel_buf(pnl, &pbuf, &pstride);
+				for (int y = pnl->y1; y <= pnl->y2; y++)
+				{
+					for (int x = pnl->x1; x <= pnl->x2; x++)
+					{
+						pbuf[(y * pstride) + x] = fill;
+					}
+				}
+			}
+			pnl->cx = 0;
+			pnl->cy = 0;
+		}
+		else
+		{
+			memset(frame, 0, framex * framey * sizeof(uint16_t));
+			for (int i = 0; i < num_panels; i++)
+			{
+				framepanels[i].cx = 0;
+				framepanels[i].cy = 0;
+				// Also clear any vbufs
+				if (framepanels[i].vbuf)
+				{
+					uint16_t fill = ' ' | ((uint16_t)framepanels[i].default_fc << 8) | ((uint16_t)framepanels[i].default_bc << 12);
+					for (int j = 0; j < framepanels[i].vw * framepanels[i].vh; j++)
+						framepanels[i].vbuf[j] = fill;
+				}
+			}
+		}
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"COLOUR")))
+	{
+		// FRAME COLOUR panel_id, fg [, bg]
+		// Sets default foreground and optional background colour for a panel.
+		getcsargs(&p, 5);
+		if (argc < 3)
+			SyntaxError();
+		int panel_id = getint(argv[0], 1, num_panels);
+		if (!framepanels[panel_id - 1].active)
+			error("Panel not active");
+		FramePanel *pnl = &framepanels[panel_id - 1];
+		pnl->default_fc = RGB121(getint(argv[2], 0, WHITE));
+		if (argc >= 5 && *argv[4])
+			pnl->default_bc = RGB121(getint(argv[4], 0, WHITE));
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"CLEAR")))
+	{
+		memset(frame, 0, framex * framey * sizeof(uint16_t));
+		free_overlays();
+		// Free any vbufs
+		for (int i = 0; i < num_panels; i++)
+		{
+			if (framepanels[i].vbuf)
+				FreeMemorySafe((void **)&framepanels[i].vbuf);
+		}
+		FreeMemorySafe((void **)&framepanels);
+		num_panels = 0;
+		max_panels = 0;
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"CLOSE")))
+	{
+		if (!frame)
+			error("Frame does not exist");
+		free_overlays();
+		// Free any vbufs
+		for (int i = 0; i < num_panels; i++)
+		{
+			if (framepanels[i].vbuf)
+				FreeMemorySafe((void **)&framepanels[i].vbuf);
+		}
+		FreeMemorySafe((void **)&frame);
+		FreeMemorySafe((void **)&outframe);
+		FreeMemorySafe((void **)&framepanels);
+		num_panels = 0;
+		max_panels = 0;
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"WRITE")))
+	{
+		// Render changed cells to screen.
+		unsigned char save_console = Option.DISPLAY_CONSOLE;
+		if (Option.DISPLAY_TYPE)
+			Option.DISPLAY_CONSOLE = 1;
+		int sx = CurrentX / gui_font_width, sy = CurrentY / gui_font_height;
+		// Restore old LCD cursor cell before render so outframe comparison is clean
+		if (lcd_cursor_active && Option.DISPLAY_TYPE)
+		{
+			frame_restore_lcd_cursor();
+			// Also fix outframe so frame_render sees a clean cell
+			// (frame_draw_cell_at updated the LCD but outframe still has the true value)
+		}
+		int changed = frame_render();
+		int cursor_x = -1, cursor_y = -1; // screen coords for cursor
+		if (framecursor_on && frame_last_panel > 0 && frame_last_panel <= num_panels)
+		{
+			// Position serial cursor at the last-updated panel's logical cursor
+			FramePanel *pnl = &framepanels[frame_last_panel - 1];
+			if (pnl->active)
+			{
+				int cx_abs = pnl->x1 + pnl->cx - (pnl->vbuf ? pnl->sx : 0);
+				int cy_abs = pnl->y1 + pnl->cy - (pnl->vbuf ? pnl->sy : 0);
+				// If this panel belongs to a visible overlay, offset by overlay screen position
+				FrameOverlay *ov = find_overlay_by_panel(frame_last_panel);
+				if (ov && ov->visible)
+				{
+					cx_abs = ov->ox + pnl->x1 + pnl->cx - (pnl->vbuf ? pnl->sx : 0);
+					cy_abs = ov->oy + pnl->y1 + pnl->cy - (pnl->vbuf ? pnl->sy : 0);
+					// Check if a higher-z overlay obscures the cursor position
+					bool obscured = false;
+					for (int oi = 0; oi < num_overlays; oi++)
+					{
+						FrameOverlay *other = &frame_overlays[oi];
+						if (other == ov || !other->visible || other->zorder <= ov->zorder)
+							continue;
+						if (cx_abs >= other->ox && cx_abs < other->ox + other->width &&
+							cy_abs >= other->oy && cy_abs < other->oy + other->height)
+						{
+							obscured = true;
+							break;
+						}
+					}
+					if (!obscured)
+					{
+						SMoveCursor(cx_abs, cy_abs);
+						SSPrintString("\033[?25h"); // show serial cursor
+						cursor_x = cx_abs;
+						cursor_y = cy_abs;
+					}
+					else
+						SSPrintString("\033[?25l"); // hide cursor when obscured
+				}
+				else if (!ov)
+				{
+					// Regular panel (not an overlay)
+					SMoveCursor(cx_abs, cy_abs);
+					SSPrintString("\033[?25h");
+					cursor_x = cx_abs;
+					cursor_y = cy_abs;
+				}
+			}
+			else if (changed)
+				SMoveCursor(sx, sy);
+		}
+		else if (changed)
+		{
+			SMoveCursor(sx, sy);
+			if (framecursor_on)
+				SSPrintString("\033[?25h");
+		}
+		// Draw LCD inverted cursor at the computed position and start blink cycle
+		if (framecursor_on && cursor_x >= 0)
+		{
+			if (Option.DISPLAY_TYPE)
+				frame_draw_lcd_cursor(cursor_x, cursor_y);
+			lcd_cursor_blink_on = true;
+			lcd_cursor_blink_time = time_us_64();
+		}
+		// Restore colours after render
+		SColour(gui_fcolour, 1);
+		SColour(gui_bcolour, 0);
+		Option.DISPLAY_CONSOLE = save_console;
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"PANEL")))
+	{
+		// FRAME PANEL id, x, y, w, h
+		// Manually define a panel at arbitrary frame buffer coordinates.
+		getcsargs(&p, 9);
+		if (argc < 9)
+			SyntaxError();
+		int id = getint(argv[0], 1, framex * framey);
+		int x = getint(argv[2], 0, framex - 1);
+		int y = getint(argv[4], 0, framey - 1);
+		int w = getint(argv[6], 1, framex - x);
+		int h = getint(argv[8], 1, framey - y);
+		ensure_panels(id);
+		// Free any existing vbuf on this panel
+		if (framepanels[id - 1].vbuf)
+			FreeMemorySafe((void **)&framepanels[id - 1].vbuf);
+		framepanels[id - 1].x1 = x;
+		framepanels[id - 1].y1 = y;
+		framepanels[id - 1].x2 = x + w - 1;
+		framepanels[id - 1].y2 = y + h - 1;
+		framepanels[id - 1].cx = 0;
+		framepanels[id - 1].cy = 0;
+		framepanels[id - 1].active = true;
+		framepanels[id - 1].buffer = NULL;
+		framepanels[id - 1].buf_stride = 0;
+		framepanels[id - 1].vw = 0;
+		framepanels[id - 1].vh = 0;
+		framepanels[id - 1].sx = 0;
+		framepanels[id - 1].sy = 0;
+		framepanels[id - 1].default_fc = RGB121(gui_fcolour);
+		framepanels[id - 1].default_bc = 0;
+		if (id > num_panels)
+			num_panels = id;
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"OVERLAY")))
+	{
+		// FRAME OVERLAY panel_id, width, height [, colour [, DOUBLE]]
+		// Creates an overlay with its own buffer and a border, registered as the given panel ID.
+		// Width and height include the border. Panel interior is (w-2) x (h-2).
+		int fc = gui_fcolour;
+		bool dual = false;
+		getcsargs(&p, 9);
+		if (argc < 5)
+			SyntaxError();
+		int id = getint(argv[0], 1, framex * framey);
+		int w = getint(argv[2], 3, framex);
+		int h = getint(argv[4], 3, framey);
+		if (argc >= 7 && *argv[6])
+			fc = getint(argv[6], 0, WHITE);
+		if (argc >= 9 && *argv[8])
+		{
+			if (checkstring(argv[8], (unsigned char *)"DOUBLE"))
+				dual = true;
+		}
+		fc = RGB121(fc);
+		// Check panel ID not already in use
+		ensure_panels(id);
+		if (framepanels[id - 1].active)
+			error("Panel ID already in use");
+		// Check overlay doesn't already exist for this ID
+		if (find_overlay_by_panel(id))
+			error("Overlay already exists");
+		// Grow overlay array if needed
+		if (num_overlays >= max_overlays)
+		{
+			int newmax = max_overlays + 8;
+			FrameOverlay *nov = (FrameOverlay *)GetMemory(newmax * sizeof(FrameOverlay));
+			if (frame_overlays)
+			{
+				memcpy(nov, frame_overlays, num_overlays * sizeof(FrameOverlay));
+				FreeMemorySafe((void **)&frame_overlays);
+			}
+			memset(&nov[num_overlays], 0, (newmax - num_overlays) * sizeof(FrameOverlay));
+			frame_overlays = nov;
+			max_overlays = newmax;
+		}
+		// Allocate overlay buffer
+		FrameOverlay *ov = &frame_overlays[num_overlays];
+		ov->buffer = (uint16_t *)GetMemory(w * h * sizeof(uint16_t));
+		memset(ov->buffer, 0, w * h * sizeof(uint16_t));
+		ov->width = w;
+		ov->height = h;
+		ov->panel_id = id;
+		ov->ox = 0;
+		ov->oy = 0;
+		ov->visible = false;
+		ov->zorder = 0;
+		num_overlays++;
+		// Draw border into the overlay buffer
+		// Top-left corner
+		framewritechar_to(ov->buffer, w, 0, 0, dual ? c_d_topleft : c_topleft, fc, 0);
+		// Top-right corner
+		framewritechar_to(ov->buffer, w, w - 1, 0, dual ? c_d_topright : c_topright, fc, 0);
+		// Bottom-left corner
+		framewritechar_to(ov->buffer, w, 0, h - 1, dual ? c_d_bottomleft : c_bottomleft, fc, 0);
+		// Bottom-right corner
+		framewritechar_to(ov->buffer, w, w - 1, h - 1, dual ? c_d_bottomright : c_bottomright, fc, 0);
+		// Top and bottom horizontal lines
+		for (int bx = 1; bx < w - 1; bx++)
+		{
+			framewritechar_to(ov->buffer, w, bx, 0, dual ? c_d_horizontal : c_horizontal, fc, 0);
+			framewritechar_to(ov->buffer, w, bx, h - 1, dual ? c_d_horizontal : c_horizontal, fc, 0);
+		}
+		// Left and right vertical lines
+		for (int by = 1; by < h - 1; by++)
+		{
+			framewritechar_to(ov->buffer, w, 0, by, dual ? c_d_vertical : c_vertical, fc, 0);
+			framewritechar_to(ov->buffer, w, w - 1, by, dual ? c_d_vertical : c_vertical, fc, 0);
+		}
+		// Register as a panel â€” interior is inside the border
+		framepanels[id - 1].x1 = 1;
+		framepanels[id - 1].y1 = 1;
+		framepanels[id - 1].x2 = w - 2;
+		framepanels[id - 1].y2 = h - 2;
+		framepanels[id - 1].cx = 0;
+		framepanels[id - 1].cy = 0;
+		framepanels[id - 1].active = true;
+		framepanels[id - 1].buffer = ov->buffer;
+		framepanels[id - 1].buf_stride = w;
+		framepanels[id - 1].default_fc = RGB121(gui_fcolour);
+		framepanels[id - 1].default_bc = 0;
+		// Fill interior with opaque spaces
+		for (int fy = 1; fy < h - 1; fy++)
+			for (int fx = 1; fx < w - 1; fx++)
+				ov->buffer[fy * w + fx] = ' ';
+		if (id > num_panels)
+			num_panels = id;
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"SHOW")))
+	{
+		// FRAME SHOW panel_id, x, y
+		// Shows an overlay at position (x, y) on the main frame.
+		getcsargs(&p, 5);
+		if (argc < 5)
+			SyntaxError();
+		int id = getint(argv[0], 1, num_panels);
+		int x = getint(argv[2], 0, framex - 1);
+		int y = getint(argv[4], 0, framey - 1);
+		FrameOverlay *ov = find_overlay_by_panel(id);
+		if (!ov)
+			error("Not an overlay panel");
+		ov->ox = x;
+		ov->oy = y;
+		ov->visible = true;
+		ov->zorder = ++overlay_zcounter;
+		frame_last_panel = id; // bring cursor focus to shown overlay
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"HIDE")))
+	{
+		// FRAME HIDE panel_id
+		// Hides an overlay.
+		int id = getint(p, 1, num_panels);
+		FrameOverlay *ov = find_overlay_by_panel(id);
+		if (!ov)
+			error("Not an overlay panel");
+		ov->visible = false;
+		if (frame_last_panel == id)
+		{
+			frame_last_panel = 0; // cursor was on this overlay; clear it
+			if (Option.DISPLAY_TYPE && lcd_cursor_active)
+			{
+				unsigned char sc = Option.DISPLAY_CONSOLE;
+				Option.DISPLAY_CONSOLE = 1;
+				frame_restore_lcd_cursor();
+				SColour(gui_fcolour, 1);
+				SColour(gui_bcolour, 0);
+				Option.DISPLAY_CONSOLE = sc;
+			}
+		}
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"VBUF")))
+	{
+		// FRAME VBUF panel_id, vwidth, vheight
+		// Allocate a virtual buffer larger than the visible panel area.
+		// Content is written into the vbuf; a viewport is flushed to the
+		// frame/overlay buffer before rendering.
+		getcsargs(&p, 5);
+		if (argc < 5)
+			SyntaxError();
+		int id = getint(argv[0], 1, num_panels);
+		if (id > num_panels || !framepanels[id - 1].active)
+			error("Panel not active");
+		int vw = getint(argv[2], 1, 10000);
+		int vh = getint(argv[4], 1, 10000);
+		FramePanel *pnl = &framepanels[id - 1];
+		// Free any previous vbuf
+		if (pnl->vbuf)
+			FreeMemorySafe((void **)&pnl->vbuf);
+		pnl->vbuf = (uint16_t *)GetMemory(vw * vh * sizeof(uint16_t));
+		pnl->vw = vw;
+		pnl->vh = vh;
+		pnl->sx = 0;
+		pnl->sy = 0;
+		// Fill with spaces using panel default colours
+		uint16_t blank = ' ' | ((uint16_t)pnl->default_fc << 8) | ((uint16_t)pnl->default_bc << 12);
+		for (int i = 0; i < vw * vh; i++)
+			pnl->vbuf[i] = blank;
+		// Reset cursor
+		pnl->cx = 0;
+		pnl->cy = 0;
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"SCROLL")))
+	{
+		// FRAME SCROLL panel_id, sx, sy
+		// Set the viewport scroll offset for a vbuf panel.
+		getcsargs(&p, 5);
+		if (argc < 5)
+			SyntaxError();
+		int id = getint(argv[0], 1, num_panels);
+		if (id > num_panels || !framepanels[id - 1].active)
+			error("Panel not active");
+		FramePanel *pnl = &framepanels[id - 1];
+		if (!pnl->vbuf)
+			error("Panel has no virtual buffer");
+		int pw = pnl->x2 - pnl->x1 + 1;
+		int ph = pnl->y2 - pnl->y1 + 1;
+		int sx = getint(argv[2], 0, pnl->vw - pw);
+		int sy = getint(argv[4], 0, pnl->vh - ph);
+		pnl->sx = sx;
+		pnl->sy = sy;
+	}
+	else if ((p = checkstring(cmdline, (unsigned char *)"DESTROY")))
+	{
+		// FRAME DESTROY panel_id
+		// Destroys an overlay and frees its resources.
+		int id = getint(p, 1, num_panels);
+		FrameOverlay *ov = find_overlay_by_panel(id);
+		if (!ov)
+			error("Not an overlay panel");
+		// Free vbuf if present
+		if (framepanels[id - 1].vbuf)
+			FreeMemorySafe((void **)&framepanels[id - 1].vbuf);
+		FreeMemorySafe((void **)&ov->buffer);
+		framepanels[id - 1].active = false;
+		framepanels[id - 1].buffer = NULL;
+		// Remove from overlay array by shifting
+		int idx = ov - frame_overlays;
+		for (int i = idx; i < num_overlays - 1; i++)
+			frame_overlays[i] = frame_overlays[i + 1];
+		num_overlays--;
+	}
+	else
+	{
+		// Legacy: FRAME x, y, text$ [, fc [, bc]]
+		int bc = 0, fc = gui_fcolour;
+		getcsargs(&cmdline, 9);
+		if (argc < 5)
+			SyntaxError();
+		int x = getint(argv[0], 0, framex - 1);
+		int y = getint(argv[2], 0, framey - 1);
+		p = getCstring(argv[4]);
+		if (argc >= 7 && *argv[6])
+			fc = getint(argv[6], 0, WHITE);
+		if (argc == 9)
+			bc = RGB121(getint(argv[8], 0, WHITE));
+		int l = strlen((char *)p);
+		fc = RGB121(fc);
+		while (l--)
+		{
+			if (x == framex)
+			{
+				y++;
+				x = 0;
+			}
+			if (y == framey)
+				return;
+			framewritechar(x++, y, *p++, fc, bc);
+		}
+	}
+}
+
+// ============================================================================
+// FRAME() query function
+// ============================================================================
+void MIPS16 fun_frame(void)
+{
+	unsigned char *tp;
+
+	// FRAME(WIDTH) - frame width in characters
+	if (checkstring(ep, (unsigned char *)"WIDTH"))
+	{
+		iret = framex;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(HEIGHT) - frame height in characters
+	else if (checkstring(ep, (unsigned char *)"HEIGHT"))
+	{
+		iret = framey;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(PANELS) - number of active panels
+	else if (checkstring(ep, (unsigned char *)"PANELS"))
+	{
+		int count = 0;
+		for (int i = 0; i < num_panels; i++)
+			if (framepanels[i].active)
+				count++;
+		iret = count;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(OVERLAYS) - number of overlays
+	else if (checkstring(ep, (unsigned char *)"OVERLAYS"))
+	{
+		iret = num_overlays;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(PW id) - panel interior width
+	else if ((tp = checkstring(ep, (unsigned char *)"PW")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].x2 - framepanels[id - 1].x1 + 1;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(PH id) - panel interior height
+	else if ((tp = checkstring(ep, (unsigned char *)"PH")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].y2 - framepanels[id - 1].y1 + 1;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(PX id) - panel cursor X position
+	else if ((tp = checkstring(ep, (unsigned char *)"PX")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].cx;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(PY id) - panel cursor Y position
+	else if ((tp = checkstring(ep, (unsigned char *)"PY")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].cy;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(FC id) - panel default foreground colour
+	else if ((tp = checkstring(ep, (unsigned char *)"FC")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].default_fc;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(BC id) - panel default background colour
+	else if ((tp = checkstring(ep, (unsigned char *)"BC")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].default_bc;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(ACTIVE id) - whether panel is active (1/0)
+	else if ((tp = checkstring(ep, (unsigned char *)"ACTIVE")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		iret = framepanels[id - 1].active ? 1 : 0;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(VISIBLE id) - whether overlay is visible (1/0)
+	else if ((tp = checkstring(ep, (unsigned char *)"VISIBLE")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		FrameOverlay *ov = find_overlay_by_panel(id);
+		if (!ov)
+			error("Panel % is not an overlay", id);
+		iret = ov->visible ? 1 : 0;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(CELL x, y) - read cell from main frame (returns raw uint16_t)
+	else if ((tp = checkstring(ep, (unsigned char *)"CELL")))
+	{
+		getcsargs(&tp, 3);
+		int x = (int)getint(argv[0], 0, framex - 1);
+		int y = (int)getint(argv[2], 0, framey - 1);
+		iret = framegetchar(x, y);
+		targ = T_INT;
+		return;
+	}
+	// FRAME(PCELL id, x, y) - read cell from panel buffer
+	// For vbuf panels, reads from the virtual buffer (full virtual coords).
+	else if ((tp = checkstring(ep, (unsigned char *)"PCELL")))
+	{
+		getcsargs(&tp, 5);
+		int id = (int)getint(argv[0], 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		FramePanel *pnl = &framepanels[id - 1];
+		uint16_t *buf;
+		int stride;
+		panel_buf(pnl, &buf, &stride);
+		int ox, oy, pw, ph;
+		panel_write_geometry(pnl, &ox, &oy, &pw, &ph);
+		int x = (int)getint(argv[2], 0, pw - 1);
+		int y = (int)getint(argv[4], 0, ph - 1);
+		iret = buf[(oy + y) * stride + (ox + x)];
+		targ = T_INT;
+		return;
+	}
+	// FRAME(VW id) - virtual buffer width (0 if no vbuf)
+	else if ((tp = checkstring(ep, (unsigned char *)"VW")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].vbuf ? framepanels[id - 1].vw : 0;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(VH id) - virtual buffer height (0 if no vbuf)
+	else if ((tp = checkstring(ep, (unsigned char *)"VH")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].vbuf ? framepanels[id - 1].vh : 0;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(SX id) - scroll X offset (0 if no vbuf)
+	else if ((tp = checkstring(ep, (unsigned char *)"SX")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].vbuf ? framepanels[id - 1].sx : 0;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(SY id) - scroll Y offset (0 if no vbuf)
+	else if ((tp = checkstring(ep, (unsigned char *)"SY")))
+	{
+		int id = (int)getint(tp, 1, num_panels);
+		if (!framepanels[id - 1].active)
+			error("Panel % not active", id);
+		iret = framepanels[id - 1].vbuf ? framepanels[id - 1].sy : 0;
+		targ = T_INT;
+		return;
+	}
+	// FRAME(INKEY) - frame-aware non-blocking key read (returns string like INKEY$)
+	else if (checkstring(ep, (unsigned char *)"INKEY"))
+	{
+		if (!frame)
+			error("Frame not created");
+
+		// Animate cursor blink if cursor is enabled and we know which panel
+		if (framecursor_on && frame_last_panel > 0 && frame_last_panel <= num_panels)
+		{
+			FramePanel *pnl = &framepanels[frame_last_panel - 1];
+			if (pnl->active)
+			{
+				int cx_abs = pnl->x1 + pnl->cx - (pnl->vbuf ? pnl->sx : 0);
+				int cy_abs = pnl->y1 + pnl->cy - (pnl->vbuf ? pnl->sy : 0);
+				FrameOverlay *ov = find_overlay_by_panel(frame_last_panel);
+				if (ov && ov->visible)
+				{
+					cx_abs += ov->ox;
+					cy_abs += ov->oy;
+				}
+				frame_blink_cursor(cx_abs, cy_abs);
+			}
+		}
+
+		sret = GetTempStrMemory();
+		int c = MMInkey();
+		if (c != -1)
+		{
+			sret[0] = 1; // length
+			sret[1] = c; // character
+		}
+		targ = T_STR;
+		return;
+	}
+	else
+		error("Unknown FRAME function");
+}
+#endif
 #ifdef rp2350
 void parse_and_strip(char *string, int *dims)
 {

@@ -416,6 +416,10 @@ void MIPS16 ConfigDisplaySPI(unsigned char *p)
 
 // initialise the display controller
 // this is used in the initial boot sequence of the Micromite
+#define LCD_INIT_DELAY 0x80
+#define LCD_INIT_END 0x00
+static void MIPS16 lcd_run_init_seq(const uint8_t *seq);
+
 void MIPS16 InitDisplaySPI(int InitOnly)
 {
 #if PICOMITERP2350
@@ -522,56 +526,41 @@ void MIPS16 InitDisplaySPI(int InitOnly)
 	case ST7796SPBUFF:
 	case ST7796SBUFF:
 #endif
+	{
+		static const uint8_t st7796s_seq[] = {
+			0xC5, 1, 0x1C,			  // VCOM Control 1
+			0x3A, 1, 0x55,			  // 565
+			0xB0, LCD_INIT_DELAY, 15, // Interface, 150ms
+			0xB4, 1, 0x01,			  // Inversion Control
+			LCD_INIT_END};
+		static const uint8_t st7796s_post_seq[] = {
+			0xB6, 3, 0x80, 0x02, 0x3B, // Display Function Control
+			0xB7, 1, 0xC6,			   // Entry Mode
+			0xF0, 1, 0xC3,			   // Mfr command unlock
+			0xF0, 1, 0x96,			   // Mfr command unlock
+			LCD_INIT_END};
+		static const uint8_t st7796s_end_seq[] = {
+			0x11, LCD_INIT_DELAY, 15, // SLPOUT, 150ms
+			0x29, LCD_INIT_DELAY, 15, // DISPON, 150ms
+			LCD_INIT_END};
+		static const uint8_t madctl[] = {ILI9341_Landscape, ILI9341_Portrait,
+										 ILI9341_Landscape180, ILI9341_Portrait180};
 		ResetController();
-		spi_write_cd(0xC5, 1, 0x1C); // VCOM  Control 1 [1C]
-		spi_write_cd(0x3A, 1, 0x55); // 565
-		spi_write_command(0xB0);	 // Interface     [00]
-		uSec(150000);
-		// 0xB1, 2, 0xB0, 0x11,        //Frame Rate Control [A0 10]
-		spi_write_cd(0xB4, 1, 0x01); // Inversion Control [01]
-		if (Option.BGR)
-			spi_write_command(0x21);
-		else
-			spi_write_command(0x20);
-		spi_write_cd(0xB6, 3, 0x80, 0x02, 0x3B); // Display Function Control [80 02 3B] .kbv SS=1, NL=480
-		spi_write_cd(0xB7, 1, 0xC6);			 // Entry Mode      [06]
-		//    0xF7, 4, 0xA9, 0x51, 0x2C, 0x82,    //Adjustment Control 3 [A9 51 2C 82]
-		spi_write_cd(0xF0, 1, 0xC3); //?? lock manufacturer commands
-		spi_write_cd(0xF0, 1, 0x96); //
-									 //		spi_write_cd(0xFB, 1, 0x3C);              //
-		switch (Option.DISPLAY_ORIENTATION)
-		{
-		case LANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Landscape);
-			break;
-		case PORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Portrait);
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Landscape180);
-			break;
-		case RPORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Portrait180);
-			break;
-		}
+		lcd_run_init_seq(st7796s_seq);
+		spi_write_command(Option.BGR ? 0x21 : 0x20);
+		lcd_run_init_seq(st7796s_post_seq);
+		spi_write_cd(ILI9341_MEMCONTROL, 1, madctl[Option.DISPLAY_ORIENTATION - 1]);
 #if PICOMITERP2350
 		if (Option.DISPLAY_TYPE == ST7796SP || Option.DISPLAY_TYPE == ST7796SPBUFF)
-		{
 #else
 		if (Option.DISPLAY_TYPE == ST7796SP)
-		{
 #endif
 			spi_write_cd(0x33, 6, 0x00, 0x00, 0x01, 0x40, 0x00, 0xA0);
-		}
 		else
-		{
 			spi_write_cd(0x33, 6, 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00);
-		}
-		spi_write_command(0x11);
-		uSec(150000);
-		spi_write_command(0x29); // Display on
-		uSec(150000);
-		break;
+		lcd_run_init_seq(st7796s_end_seq);
+	}
+	break;
 	case ILI9488:
 	case ILI9488P:
 	case ILI9488W:
@@ -579,627 +568,340 @@ void MIPS16 InitDisplaySPI(int InitOnly)
 	case ILI9488PBUFF:
 	case ILI9488BUFF:
 	case ILI9488WBUFF:
-		ResetController();
-		if (Option.DISPLAY_TYPE == ILI9488 || Option.DISPLAY_TYPE == ILI9488P || Option.DISPLAY_TYPE == ILI9488PBUFF || Option.DISPLAY_TYPE == ILI9488BUFF)
-		{
-#else
-		ResetController();
-		if (Option.DISPLAY_TYPE == ILI9488 || Option.DISPLAY_TYPE == ILI9488P)
-		{
 #endif
-			spi_write_command(0xE0); // Positive Gamma Control
-			spi_write_data(0x00);
-			spi_write_data(0x03);
-			spi_write_data(0x09);
-			spi_write_data(0x08);
-			spi_write_data(0x16);
-			spi_write_data(0x0A);
-			spi_write_data(0x3F);
-			spi_write_data(0x78);
-			spi_write_data(0x4C);
-			spi_write_data(0x09);
-			spi_write_data(0x0A);
-			spi_write_data(0x08);
-			spi_write_data(0x16);
-			spi_write_data(0x1A);
-			spi_write_data(0x0F);
-
-			spi_write_command(0XE1); // Negative Gamma Control
-			spi_write_data(0x00);
-			spi_write_data(0x16);
-			spi_write_data(0x19);
-			spi_write_data(0x03);
-			spi_write_data(0x0F);
-			spi_write_data(0x05);
-			spi_write_data(0x32);
-			spi_write_data(0x45);
-			spi_write_data(0x46);
-			spi_write_data(0x04);
-			spi_write_data(0x0E);
-			spi_write_data(0x0D);
-			spi_write_data(0x35);
-			spi_write_data(0x37);
-			spi_write_data(0x0F);
-
-			spi_write_command(0XC0); // Power Control 1
-			spi_write_data(0x17);
-			spi_write_data(0x15);
-
-			spi_write_command(0xC1); // Power Control 2
-			spi_write_data(0x41);
-
-			spi_write_command(0xC5); // VCOM Control
-			spi_write_data(0x00);
-			spi_write_data(0x12);
-			spi_write_data(0x80);
-
-			spi_write_command(TFT_MADCTL); // Memory Access Control
-			spi_write_data(0x48);		   // MX, BGR
-
-			spi_write_command(0x3A); // Pixel Interface Format
-			spi_write_data(0x66);	 // 18 bit colour for SPI
-
-			spi_write_command(0xB0); // Interface Mode Control
-			spi_write_data(0x00);
-
-			spi_write_command(0xB1); // Frame Rate Control
-			spi_write_data(0xA0);
+	{
+		static const uint8_t ili9488_seq[] = {
+			0xE0, 15, 0x00, 0x03, 0x09, 0x08, 0x16, 0x0A, 0x3F, 0x78,
+			0x4C, 0x09, 0x0A, 0x08, 0x16, 0x1A, 0x0F, // Positive Gamma
+			0xE1, 15, 0x00, 0x16, 0x19, 0x03, 0x0F, 0x05, 0x32, 0x45,
+			0x46, 0x04, 0x0E, 0x0D, 0x35, 0x37, 0x0F, // Negative Gamma
+			0xC0, 2, 0x17, 0x15,					  // Power Control 1
+			0xC1, 1, 0x41,							  // Power Control 2
+			0xC5, 3, 0x00, 0x12, 0x80,				  // VCOM Control
+			0x36, 1, 0x48,							  // Memory Access Control
+			0x3A, 1, 0x66,							  // Pixel Interface Format 18-bit
+			0xB0, 1, 0x00,							  // Interface Mode Control
+			0xB1, 1, 0xA0,							  // Frame Rate Control
+			LCD_INIT_END};
+		static const uint8_t ili9488_post_bgr[] = {
+			0xB4, 1, 0x02,					 // Display Inversion Control
+			0xB6, 3, 0x02, 0x02, 0x3B,		 // Display Function Control
+			0xB7, 1, 0xC6,					 // Entry Mode Set
+			0xF7, 4, 0xA9, 0x51, 0x2C, 0x82, // Adjust Control 3
+			0x11, LCD_INIT_DELAY, 12,		 // Exit Sleep, 120ms
+			LCD_INIT_END};
+		static const uint8_t ili9488w_seq[] = {
+			0xC2, 1, 0x33,			   // Normal mode
+			0xC5, 3, 0x00, 0x1E, 0x80, // VCM_REG
+			0xB1, 1, 0xB0,			   // Frame rate 70Hz
+			0x36, 1, 0x28,			   // 2 DOT FRAME MODE
+			0xE0, 15, 0x00, 0x13, 0x18, 0x04, 0x0F, 0x06, 0x3A, 0x56,
+			0x4D, 0x03, 0x0A, 0x06, 0x30, 0x3E, 0x0F,
+			0xE1, 15, 0x00, 0x13, 0x18, 0x01, 0x11, 0x06, 0x38, 0x34,
+			0x4D, 0x06, 0x0D, 0x0B, 0x31, 0x37, 0x0F,
+			0x3A, 1, 0x55,			  // Pixel Format 16-bit
+			0x11, LCD_INIT_DELAY, 12, // Sleep out, 120ms
+			0x29, 0,				  // Display on
+			LCD_INIT_END};
+		static const uint8_t madctl[] = {ILI9341_Landscape, ILI9341_Portrait,
+										 ILI9341_Landscape180, ILI9341_Portrait180};
+		ResetController();
+#if PICOMITERP2350
+		if (Option.DISPLAY_TYPE == ILI9488 || Option.DISPLAY_TYPE == ILI9488P || Option.DISPLAY_TYPE == ILI9488PBUFF || Option.DISPLAY_TYPE == ILI9488BUFF)
+#else
+		if (Option.DISPLAY_TYPE == ILI9488 || Option.DISPLAY_TYPE == ILI9488P)
+#endif
+		{
+			lcd_run_init_seq(ili9488_seq);
 			if (Option.BGR)
 				spi_write_command(0x21);
-			spi_write_command(0xB4); // Display Inversion Control
-			spi_write_data(0x02);
-
-			spi_write_command(0xB6); // Display Function Control
-			spi_write_data(0x02);
-			spi_write_data(0x02);
-			spi_write_data(0x3B);
-
-			spi_write_command(0xB7); // Entry Mode Set
-			spi_write_data(0xC6);
-
-			spi_write_command(0xF7); // Adjust Control 3
-			spi_write_data(0xA9);
-			spi_write_data(0x51);
-			spi_write_data(0x2C);
-			spi_write_data(0x82);
-
-			spi_write_command(TFT_SLPOUT); // Exit Sleep
-			uSec(120000);
+			lcd_run_init_seq(ili9488_post_bgr);
 #if PICOMITERP2350
 			if (Option.DISPLAY_TYPE == ILI9488P || Option.DISPLAY_TYPE == ILI9488PBUFF)
-			{
 #else
 			if (Option.DISPLAY_TYPE == ILI9488P)
-			{
 #endif
-				spi_write_command(0x33);
-				spi_write_data(0x00);
-				spi_write_data(0x00);
-				spi_write_data(0x01);
-				spi_write_data(0x40);
-				spi_write_data(0x00);
-				spi_write_data(0xA0);
-			}
+				spi_write_cd(0x33, 6, 0x00, 0x00, 0x01, 0x40, 0x00, 0xA0);
 			else
-			{
-				spi_write_command(0x33);
-				spi_write_data(0x00);
-				spi_write_data(0x00);
-				spi_write_data(0x01);
-				spi_write_data(0xE0);
-				spi_write_data(0x00);
-				spi_write_data(0x00);
-			}
-			spi_write_command(TFT_DISPON); // Display on
+				spi_write_cd(0x33, 6, 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00);
+			spi_write_command(TFT_DISPON);
 			uSec(25000);
 		}
 		else
 		{
-			if (Option.BGR)
-				spi_write_command(0x20);
-			else
-				spi_write_command(0x21);
-			spi_write_command(0xC2); // Normal mode, increase can change the display quality, while increasing power consumption
-			spi_write_data(0x33);
-			spi_write_command(0XC5);
-			spi_write_data(0x00);
-			spi_write_data(0x1e); // VCM_REG[7:0]. <=0X80.
-			spi_write_data(0x80);
-			spi_write_command(0xB1); // Sets the frame frequency of full color normal mode
-			spi_write_data(0xB0);	 // 0XB0 =70HZ, <=0XB0.0xA0=62HZ
-			spi_write_command(0x36);
-			spi_write_data(0x28); // 2 DOT FRAME MODE,F<=70HZ.
-			spi_write_command(0XE0);
-			spi_write_data(0x0);
-			spi_write_data(0x13);
-			spi_write_data(0x18);
-			spi_write_data(0x04);
-			spi_write_data(0x0F);
-			spi_write_data(0x06);
-			spi_write_data(0x3a);
-			spi_write_data(0x56);
-			spi_write_data(0x4d);
-			spi_write_data(0x03);
-			spi_write_data(0x0a);
-			spi_write_data(0x06);
-			spi_write_data(0x30);
-			spi_write_data(0x3e);
-			spi_write_data(0x0f);
-			spi_write_command(0XE1);
-			spi_write_data(0x0);
-			spi_write_data(0x13);
-			spi_write_data(0x18);
-			spi_write_data(0x01);
-			spi_write_data(0x11);
-			spi_write_data(0x06);
-			spi_write_data(0x38);
-			spi_write_data(0x34);
-			spi_write_data(0x4d);
-			spi_write_data(0x06);
-			spi_write_data(0x0d);
-			spi_write_data(0x0b);
-			spi_write_data(0x31);
-			spi_write_data(0x37);
-			spi_write_data(0x0f);
-			spi_write_command(0X3A); // Set Interface Pixel Format
-			spi_write_data(0x55);
-			spi_write_command(0x11); // sleep out
-			uSec(120000);
-			spi_write_command(0x29); // Turn on the LCD display
+			spi_write_command(Option.BGR ? 0x20 : 0x21);
+			lcd_run_init_seq(ili9488w_seq);
 		}
-		//			spi_write_command(TFT_MADCTL);
-		switch (Option.DISPLAY_ORIENTATION)
-		{
-		case LANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Landscape);
-			break;
-		case PORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Portrait);
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Landscape180);
-			break;
-		case RPORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Portrait180);
-			break;
-		}
-		break;
+		spi_write_cd(ILI9341_MEMCONTROL, 1, madctl[Option.DISPLAY_ORIENTATION - 1]);
+	}
+	break;
 	case ILI9481IPS:
+	{
+		static const uint8_t ili9481ips_seq[] = {
+			0x01, LCD_INIT_DELAY, 22,						// Soft reset, 220ms
+			0x11, LCD_INIT_DELAY, 28,						// SLPOUT, 280ms
+			0xD0, 3 | LCD_INIT_DELAY, 0x07, 0x44, 0x1E, 22, // Power Setting, 220ms
+			0xD1, 3, 0x00, 0x0C, 0x1A,						// VCOM Control
+			0xC5, 1, 0x03,									// Frame Rate
+			0xD2, 2, 0x01, 0x11,							// Normal Mode Power
+			0xE4, 1, 0xA0,
+			0xF3, 2, 0x00, 0x2A,
+			0xC8, 12, 0x00, 0x26, 0x21, 0x00, 0x00, 0x1F, 0x65, 0x23,
+			0x77, 0x00, 0x0F, 0x00,				   // Gamma
+			0xC0, 5, 0x00, 0x3B, 0x00, 0x02, 0x11, // Panel Driving
+			0xC6, 1, 0x83,						   // Interface Control
+			0xF0, 1, 0x01,
+			0xE4, 1, 0xA0,
+			0x3A, 1 | LCD_INIT_DELAY, 0x66, 28, // Pixel format, 280ms
+			LCD_INIT_END};
+		static const uint8_t ili9481ips_post_seq[] = {
+			0x2A, 4, 0x00, 0x00, 0x01, 0x3F, // Column address
+			0x2B, 4, 0x00, 0x00, 0x01, 0xDF, // Row address
+			LCD_INIT_END};
+		static const uint8_t madctl[] = {ILI9481_Landscape, ILI9481_Portrait,
+										 ILI9481_Landscape180, ILI9481_Portrait180};
 		ResetController();
-		// 3.5IPS ILI9481+CMI
-		spi_write_command(0x01); // Soft_rese
-		uSec(220000);
-
-		spi_write_command(0x11);
-		uSec(280000);
-
-		spi_write_command(0xd0); // Power_Setting
-		spi_write_data(0x07);	 // 07  VC[2:0] Sets the ratio factor of Vci to generate the reference voltages Vci1
-		spi_write_data(0x44);	 // 41  BT[2:0] Sets the Step up factor and output voltage level from the reference voltages Vci1
-		spi_write_data(0x1E);	 // 1f  17   1C  VRH[3:0]: Sets the factor to generate VREG1OUT from VCILVL
-		uSec(220000);
-
-		spi_write_command(0xd1); // VCOM Control
-		spi_write_data(0x00);	 // 00
-		spi_write_data(0x0C);	 // 1A   VCM [6:0] is used to set factor to generate VCOMH voltage from the reference voltage VREG1OUT  15    09
-		spi_write_data(0x1A);	 // 1F   VDV[4:0] is used to set the VCOM alternating amplitude in the range of VREG1OUT x 0.70 to VREG1OUT   1F   18
-
-		spi_write_command(0xC5); // Frame Rate
-		spi_write_data(0x03);	 // 03   02
-
-		spi_write_command(0xd2); // Power_Setting for Normal Mode
-		spi_write_data(0x01);	 // 01
-		spi_write_data(0x11);	 // 11
-
-		spi_write_command(0xE4); //?
-		spi_write_data(0xa0);
-		spi_write_command(0xf3);
-		spi_write_data(0x00);
-		spi_write_data(0x2a);
-
-		// 1  OK
-		spi_write_command(0xc8);
-		spi_write_data(0x00);
-		spi_write_data(0x26);
-		spi_write_data(0x21);
-		spi_write_data(0x00);
-		spi_write_data(0x00);
-		spi_write_data(0x1f);
-		spi_write_data(0x65);
-		spi_write_data(0x23);
-		spi_write_data(0x77);
-		spi_write_data(0x00);
-		spi_write_data(0x0f);
-		spi_write_data(0x00);
-		// GAMMA SETTING
-
-		spi_write_command(0xC0); // Panel Driving Setting
-		spi_write_data(0x00);	 // 1//00  REV  SM  GS
-		spi_write_data(0x3B);	 // 2//NL[5:0]: Sets the number of lines to drive the LCD at an interval of 8 lines.
-		spi_write_data(0x00);	 // 3//SCN[6:0]
-		spi_write_data(0x02);	 // 4//PTV: Sets the Vcom output in non-display area drive period
-		spi_write_data(0x11);	 // 5//NDL: Sets the source output level in non-display area.  PTG: Sets the scan mode in non-display area.
-
-		spi_write_command(0xc6); // Interface Control
-		spi_write_data(0x83);
-		// GAMMA SETTING
-
-		spi_write_command(0xf0); //?
-		spi_write_data(0x01);
-
-		spi_write_command(0xE4); //?
-		spi_write_data(0xa0);
-
-		spi_write_command(0x3a);
-		spi_write_data(0x66);
-
-		uSec(280000);
-
-		switch (Option.DISPLAY_ORIENTATION)
-		{
-		case LANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9481_Landscape);
-			break;
-		case PORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9481_Portrait);
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9481_Landscape180);
-			break;
-		case RPORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9481_Portrait180);
-			break;
-		}
-		spi_write_command(0x2a);
-		spi_write_data(0x00);
-		spi_write_data(0x00);
-		spi_write_data(0x01);
-		spi_write_data(0x3F); // 3F
-
-		spi_write_command(0x2b);
-		spi_write_data(0x00);
-		spi_write_data(0x00);
-		spi_write_data(0x01);
-		spi_write_data(0xDf); // DF
-
+		lcd_run_init_seq(ili9481ips_seq);
+		spi_write_cd(ILI9341_MEMCONTROL, 1, madctl[Option.DISPLAY_ORIENTATION - 1]);
+		lcd_run_init_seq(ili9481ips_post_seq);
 		if (Option.BGR)
 			spi_write_command(0x21);
 		spi_write_command(0x29);
-		break;
+	}
+	break;
 	case ILI9481:
+	{
+		static const uint8_t ili9481_seq[] = {
+			0x11, LCD_INIT_DELAY, 2,			   // SLPOUT, 20ms
+			0xD0, 3, 0x07, 0x42, 0x18,			   // Power Setting
+			0xD1, 3, 0x00, 0x07, 0x10,			   // VCOM Control
+			0xD2, 2, 0x01, 0x02,				   // Normal Mode Power
+			0xC0, 5, 0x10, 0x3B, 0x00, 0x02, 0x11, // Panel Driving
+			0xB3, 4, 0x00, 0x00, 0x00, 0x10,
+			0xC8, 12, 0x00, 0x32, 0x36, 0x45, 0x06, 0x16, 0x37, 0x75,
+			0x77, 0x54, 0x0C, 0x00, // Gamma
+			0xE0, 15, 0x0F, 0x24, 0x1C, 0x0A, 0x0F, 0x08, 0x43, 0x88,
+			0x03, 0x0F, 0x10, 0x06, 0x0F, 0x07, 0x00, // Positive Gamma
+			0xE1, 15, 0x0F, 0x38, 0x30, 0x09, 0x0F, 0x0F, 0x4E, 0x77,
+			0x3C, 0x07, 0x10, 0x05, 0x23, 0x1B, 0x00, // Negative Gamma
+			LCD_INIT_END};
+		static const uint8_t ili9481_post_seq[] = {
+			0x3A, 1, 0x55,					 // Pixel format 16-bit
+			0x2A, 4, 0x00, 0x00, 0x01, 0x3F, // Column address
+			0x2B, 4, 0x00, 0x00, 0x01, 0xE0, // Row address
+			LCD_INIT_END};
+		static const uint8_t madctl[] = {ILI9341_Landscape, ILI9341_Portrait,
+										 ILI9341_Landscape180, ILI9341_Portrait180};
 		DisplayHRes = 480;
 		DisplayVRes = 320;
 		ResetController();
-		spi_write_command(0x11);
-		uSec(20000);
-		spi_write_cd(0xD0, 3, 0x07, 0x42, 0x18);
-		spi_write_cd(0xD1, 3, 0x00, 0x07, 0x10);
-		spi_write_cd(0xD2, 2, 0x01, 0x02);
-		spi_write_cd(0xC0, 5, 0x10, 0x3B, 0x00, 0x02, 0x11);
-		//            spi_write_cd(0xC1, 3,0x10, 0x12, 0xC8);
-		//            spi_write_cd(0xC5,1,0x01);
-		spi_write_cd(0xB3, 4, 0x00, 0x00, 0x00, 0x10);
-		spi_write_cd(0xC8, 12, 0x00, 0x32, 0x36, 0x45, 0x06, 0x16, 0x37, 0x75, 0x77, 0x54, 0x0C, 0x00);
-		spi_write_cd(0xE0, 15, 0x0f, 0x24, 0x1c, 0x0a, 0x0f, 0x08, 0x43, 0x88, 0x03, 0x0f, 0x10, 0x06, 0x0f, 0x07, 0x00);
-		spi_write_cd(0xE1, 15, 0x0F, 0x38, 0x30, 0x09, 0x0f, 0x0f, 0x4e, 0x77, 0x3c, 0x07, 0x10, 0x05, 0x23, 0x1b, 0x00);
+		lcd_run_init_seq(ili9481_seq);
 		spi_write_cd(0x36, 0x0A);
-		spi_write_cd(0x3A, 1, 0x55);
-		spi_write_cd(0x2A, 4, 0x00, 0x00, 0x01, 0x3F);
-		spi_write_cd(0x2B, 4, 0x00, 0x00, 0x01, 0xE0);
+		lcd_run_init_seq(ili9481_post_seq);
 		if (Option.BGR)
 			spi_write_command(0x21);
 		uSec(120000);
 		spi_write_command(0x29);
-		switch (Option.DISPLAY_ORIENTATION)
-		{
-		case LANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Landscape);
-			break;
-		case PORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Portrait);
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Landscape180);
-			break;
-		case RPORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Portrait180);
-			break;
-		}
-		break;
+		spi_write_cd(ILI9341_MEMCONTROL, 1, madctl[Option.DISPLAY_ORIENTATION - 1]);
+	}
+	break;
 	case SSD1331:
+	{
+		static const uint8_t ssd1331_seq[] = {
+			0xA1, 0x00, 0xA2, 0x00, 0xA4, 0xA8, 0x3F, 0xAD, 0x8E,
+			0xB0, 0x0B, 0xB1, 0x31, 0xB3, 0xF0, 0x8A, 0x64, 0x8B, 0x78,
+			0x8A, 0x64, 0xBB, 0x3A, 0xBE, 0x3E, 0x87, 0x06, 0x81, 0x91,
+			0x82, 0x50, 0x83, 0x7D, 0xAF};
+		static const uint8_t remap[] = {0x72, 0x63, 0x60, 0x71};
 		ResetController();
-		spi_write_command(SSD1331_CMD_DISPLAYOFF); // 0xAE
-		spi_write_command(SSD1331_CMD_SETREMAP);   // 0xA0
-		if (Option.DISPLAY_ORIENTATION == 1)
-			spi_write_command(0x72);
-		else if (Option.DISPLAY_ORIENTATION == 2)
-			spi_write_command(0x63);
-		else if (Option.DISPLAY_ORIENTATION == 3)
-			spi_write_command(0x60);
-		else
-			spi_write_command(0x71);
-		spi_write_command(SSD1331_CMD_STARTLINE); // 0xA1
-		spi_write_command(0x0);
-		spi_write_command(SSD1331_CMD_DISPLAYOFFSET); // 0xA2
-		spi_write_command(0x0);
-		spi_write_command(SSD1331_CMD_NORMALDISPLAY); // 0xA4
-		spi_write_command(SSD1331_CMD_SETMULTIPLEX);  // 0xA8
-		spi_write_command(0x3F);					  // 0x3F 1/64 duty
-		spi_write_command(SSD1331_CMD_SETMASTER);	  // 0xAD
-		spi_write_command(0x8E);
-		spi_write_command(SSD1331_CMD_POWERMODE); // 0xB0
-		spi_write_command(0x0B);
-		spi_write_command(SSD1331_CMD_PRECHARGE); // 0xB1
-		spi_write_command(0x31);
-		spi_write_command(SSD1331_CMD_CLOCKDIV);   // 0xB3
-		spi_write_command(0xF0);				   // 7:4 = Oscillator Frequency, 3:0 = CLK Div Ratio (A[3:0]+1 = 1..16)
-		spi_write_command(SSD1331_CMD_PRECHARGEA); // 0x8A
-		spi_write_command(0x64);
-		spi_write_command(SSD1331_CMD_PRECHARGEB); // 0x8B
-		spi_write_command(0x78);
-		spi_write_command(SSD1331_CMD_PRECHARGEA); // 0x8C
-		spi_write_command(0x64);
-		spi_write_command(SSD1331_CMD_PRECHARGELEVEL); // 0xBB
-		spi_write_command(0x3A);
-		spi_write_command(SSD1331_CMD_VCOMH); // 0xBE
-		spi_write_command(0x3E);
-		spi_write_command(SSD1331_CMD_MASTERCURRENT); // 0x87
-		spi_write_command(0x06);
-		spi_write_command(SSD1331_CMD_CONTRASTA); // 0x81
-		spi_write_command(0x91);
-		spi_write_command(SSD1331_CMD_CONTRASTB); // 0x82
-		spi_write_command(0x50);
-		spi_write_command(SSD1331_CMD_CONTRASTC); // 0x83
-		spi_write_command(0x7D);
-		spi_write_command(SSD1331_CMD_DISPLAYON); //--turn on oled panel
-		break;
+		spi_write_command(SSD1331_CMD_DISPLAYOFF);
+		spi_write_command(SSD1331_CMD_SETREMAP);
+		spi_write_command(remap[Option.DISPLAY_ORIENTATION - 1]);
+		for (int i = 0; i < (int)sizeof(ssd1331_seq); i++)
+			spi_write_command(ssd1331_seq[i]);
+	}
+	break;
 	case ILI9341:
 #if PICOMITERP2350
 	case ILI9341BUFF:
 #endif
+	{
+		static const uint8_t ili9341_seq[] = {
+			0x01, LCD_INIT_DELAY, 2,		   // SOFTRESET, 20ms
+			0x28, 0,						   // DISPLAYOFF
+			0xC0, 1, 0x23,					   // POWERCONTROL1
+			0xC1, 1, 0x10,					   // POWERCONTROL2
+			0xC5, 2, 0x2B, 0x2B,			   // VCOMCONTROL1
+			0xC7, 1, 0xC0,					   // VCOMCONTROL2
+			0x3A, 1, 0x55,					   // PIXELFORMAT
+			0xB1, 2, 0x00, 0x1B,			   // FRAMECONTROL
+			0xB7, 1, 0x07,					   // ENTRYMODE
+			0x11, 1 | LCD_INIT_DELAY, 0x00, 5, // SLEEPOUT + data, 50ms
+			0x13, 0,						   // NORMALDISP
+			LCD_INIT_END};
+		static const uint8_t madctl[] = {ILI9341_Landscape, ILI9341_Portrait,
+										 ILI9341_Landscape180, ILI9341_Portrait180};
 		ResetController();
-		spi_write_command(ILI9341_SOFTRESET); // software reset
-		uSec(20000);
-		spi_write_command(ILI9341_DISPLAYOFF);
-		spi_write_cd(ILI9341_POWERCONTROL1, 1, 0x23);
-		spi_write_cd(ILI9341_POWERCONTROL2, 1, 0x10);
-		spi_write_cd(ILI9341_VCOMCONTROL1, 2, 0x2B, 0x2B);
-		spi_write_cd(ILI9341_VCOMCONTROL2, 1, 0xC0);
-		spi_write_cd(ILI9341_PIXELFORMAT, 1, 0x55);
-		spi_write_cd(ILI9341_FRAMECONTROL, 2, 0x00, 0x1B);
-		spi_write_cd(ILI9341_ENTRYMODE, 1, 0x07);
-		spi_write_cd(ILI9341_SLEEPOUT, 1, 0);
-		uSec(50000);
-		spi_write_command(ILI9341_NORMALDISP);
+		lcd_run_init_seq(ili9341_seq);
 		if (Option.BGR)
 			spi_write_command(ILI9341_INVERTON);
 		spi_write_command(ILI9341_DISPLAYON);
 		uSec(100000);
-		switch (Option.DISPLAY_ORIENTATION)
-		{
-		case LANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Landscape);
-			break;
-		case PORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Portrait);
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Landscape180);
-			break;
-		case RPORTRAIT:
-			spi_write_cd(ILI9341_MEMCONTROL, 1, ILI9341_Portrait180);
-			break;
-		}
-		break;
+		spi_write_cd(ILI9341_MEMCONTROL, 1, madctl[Option.DISPLAY_ORIENTATION - 1]);
+	}
+	break;
 
 	case GC9A01:
+	{
+		static const uint8_t gc9a01_seq[] = {
+			0xEF, 0,
+			0xEB, 1, 0x14,
+			0xFE, 0,
+			0xEF, 0,
+			0xEB, 1, 0x14,
+			0x84, 1, 0x40, 0x85, 1, 0xFF, 0x86, 1, 0xFF, 0x87, 1, 0xFF,
+			0x88, 1, 0x0A, 0x89, 1, 0x21, 0x8A, 1, 0x00, 0x8B, 1, 0x80,
+			0x8C, 1, 0x01, 0x8D, 1, 0x01, 0x8E, 1, 0xFF, 0x8F, 1, 0xFF,
+			0xB6, 2, 0x00, 0x20,
+			0x3A, 1, 0x05,
+			0x90, 4, 0x08, 0x08, 0x08, 0x08,
+			0xBD, 1, 0x06, 0xBC, 1, 0x00,
+			0xFF, 3, 0x60, 0x01, 0x04,
+			0xC3, 1, 0x13, 0xC4, 1, 0x13, 0xC9, 1, 0x22, 0xBE, 1, 0x11,
+			0xE1, 2, 0x10, 0x0E,
+			0xDF, 3, 0x21, 0x0C, 0x02,
+			0xF0, 6, 0x45, 0x09, 0x08, 0x08, 0x26, 0x2A,
+			0xF1, 6, 0x43, 0x70, 0x72, 0x36, 0x37, 0x6F,
+			0xF2, 6, 0x45, 0x09, 0x08, 0x08, 0x26, 0x2A,
+			0xF3, 6, 0x43, 0x70, 0x72, 0x36, 0x37, 0x6F,
+			0xED, 2, 0x1B, 0x0B,
+			0xAE, 1, 0x77, 0xCD, 1, 0x63,
+			0x70, 9, 0x07, 0x07, 0x04, 0x0E, 0x0F, 0x09, 0x07, 0x08, 0x03,
+			0xE8, 1, 0x34,
+			0x62, 12, 0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70, 0x70,
+			0x63, 12, 0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70, 0x70,
+			0x64, 7, 0x28, 0x29, 0xF1, 0x01, 0xF1, 0x00, 0x07,
+			0x66, 10, 0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00,
+			0x67, 10, 0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98,
+			0x74, 7, 0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00,
+			0x98, 2, 0x3E, 0x07,
+			0x35, 0,
+			0x11, LCD_INIT_DELAY, 1, // SLPOUT, 10ms
+			0x29, 0,				 // DISPON
+			LCD_INIT_END};
+		static const uint8_t madctl[] = {0x08, 0x68, 0xC8, 0xA8};
 		ResetController();
-		spi_write_command(0xEF);
-		spi_write_cd(0xEB, 1, 0x14);
-		spi_write_command(0xFE);
-		spi_write_command(0xEF);
-		spi_write_cd(0xEB, 1, 0x14);
-		spi_write_cd(0x84, 1, 0x40);
-		spi_write_cd(0x85, 1, 0xFF);
-		spi_write_cd(0x86, 1, 0xFF);
-		spi_write_cd(0x87, 1, 0xFF);
-		spi_write_cd(0x88, 1, 0x0A);
-		spi_write_cd(0x89, 1, 0x21);
-		spi_write_cd(0x8A, 1, 0x00);
-		spi_write_cd(0x8B, 1, 0x80);
-		spi_write_cd(0x8C, 1, 0x01);
-		spi_write_cd(0x8D, 1, 0x01);
-		spi_write_cd(0x8E, 1, 0xFF);
-		spi_write_cd(0x8F, 1, 0xFF);
-		spi_write_cd(0xB6, 2, 0x00, 0x20);
-		spi_write_cd(0x3A, 1, 0x05);
-		spi_write_cd(0x90, 4, 0x08, 0x08, 0x08, 0x08);
-		spi_write_cd(0xBD, 1, 0x06);
-		spi_write_cd(0xBC, 1, 0x00);
-		spi_write_cd(0xFF, 3, 0x60, 0x01, 0x04);
-		spi_write_cd(0xC3, 1, 0x13);
-		spi_write_cd(0xC4, 1, 0x13);
-		spi_write_cd(0xC9, 1, 0x22);
-		spi_write_cd(0xBE, 1, 0x11);
-		spi_write_cd(0xE1, 2, 0x10, 0x0E);
-		spi_write_cd(0xDF, 3, 0x21, 0x0c, 0x02);
-		spi_write_cd(0xF0, 6, 0x45, 0x09, 0x08, 0x08, 0x26, 0x2A);
-		spi_write_cd(0xF1, 6, 0x43, 0x70, 0x72, 0x36, 0x37, 0x6F);
-		spi_write_cd(0xF2, 6, 0x45, 0x09, 0x08, 0x08, 0x26, 0x2A);
-		spi_write_cd(0xF3, 6, 0x43, 0x70, 0x72, 0x36, 0x37, 0x6F);
-		spi_write_cd(0xED, 2, 0x1B, 0x0B);
-		spi_write_cd(0xAE, 1, 0x77);
-		spi_write_cd(0xCD, 1, 0x63);
-		spi_write_cd(0x70, 9, 0x07, 0x07, 0x04, 0x0E, 0x0F, 0x09, 0x07, 0x08, 0x03);
-		spi_write_cd(0xE8, 1, 0x34);
-		spi_write_cd(0x62, 12, 0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70, 0x70);
-		spi_write_cd(0x63, 12, 0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70, 0x70);
-		spi_write_cd(0x64, 7, 0x28, 0x29, 0xF1, 0x01, 0xF1, 0x00, 0x07);
-		spi_write_cd(0x66, 10, 0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00);
-		spi_write_cd(0x67, 10, 0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98);
-		spi_write_cd(0x74, 7, 0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00);
-		spi_write_cd(0x98, 2, 0x3e, 0x07);
-		spi_write_command(0x35);
-		spi_write_command(GC9A01_SLPOUT);
-		uSec(10000);
-		spi_write_command(GC9A01_DISPON);
-		switch (Option.DISPLAY_ORIENTATION)
-		{
-		case LANDSCAPE:
-			spi_write_cd(GC9A01_MADCTL, 1, 0x08);
-			break;
-		case PORTRAIT:
-			spi_write_cd(GC9A01_MADCTL, 1, 0x68);
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(GC9A01_MADCTL, 1, 0xc8);
-			break;
-		case RPORTRAIT:
-			spi_write_cd(GC9A01_MADCTL, 1, 0xa8);
-			break;
-		}
-		break;
+		lcd_run_init_seq(gc9a01_seq);
+		spi_write_cd(GC9A01_MADCTL, 1, madctl[Option.DISPLAY_ORIENTATION - 1]);
+	}
+	break;
 	case ILI9163:
+	{
+		static const uint8_t ili9163_seq[] = {
+			0x01, LCD_INIT_DELAY, 2,		   // SOFTRESET, 20ms
+			0x11, LCD_INIT_DELAY, 1,		   // SLPOUT, 10ms
+			0x3A, 1 | LCD_INIT_DELAY, 0x05, 1, // PIXFMT, 10ms
+			0x26, 1 | LCD_INIT_DELAY, 0x04, 1, // GAMMASET, 10ms
+			0xF2, 1 | LCD_INIT_DELAY, 0x01, 1, // GAMRSEL, 10ms
+			LCD_INIT_END};
+		static const uint8_t ili9163_post_seq[] = {
+			0xB6, 2, 0xFF, 0x06, // DFUNCTR
+			0xE0, 15, 0x36, 0x29, 0x12, 0x22, 0x1C, 0x15, 0x42, 0xB7,
+			0x2F, 0x13, 0x12, 0x0A, 0x11, 0x0B, 0x06, // Positive Gamma
+			0xE1, 15, 0x09, 0x16, 0x2D, 0x0D, 0x13, 0x15, 0x40, 0x48,
+			0x53, 0x0C, 0x1D, 0x25, 0x2E, 0x34, 0x39, // Negative Gamma
+			0xB1, 2 | LCD_INIT_DELAY, 0x08, 0x02, 1,  // FRMCTR1, 10ms
+			0xB4, 1 | LCD_INIT_DELAY, 0x07, 1,		  // DINVCTR, 10ms
+			0xC0, 2 | LCD_INIT_DELAY, 0x0A, 0x02, 1,  // PWCTR1, 10ms
+			0xC1, 1 | LCD_INIT_DELAY, 0x02, 1,		  // PWCTR2, 10ms
+			0xC5, 2 | LCD_INIT_DELAY, 0x50, 0x63, 1,  // VCOMCTR1, 10ms
+			0xC7, 1 | LCD_INIT_DELAY, 0x00, 1,		  // VCOMOFFS, 10ms
+			LCD_INIT_END};
+		static const uint8_t madctl[] = {ILI9163_Landscape, ILI9163_Portrait,
+										 ILI9163_Landscape180, ILI9163_Portrait180};
 		ResetController();
-		spi_write_command(ILI9341_SOFTRESET); // software reset
-		uSec(20000);
-		spi_write_command(ILI9163_SLPOUT); // exit sleep
-		uSec(5000);
-		spi_write_cd(ILI9163_PIXFMT, 1, 0x05);
-		uSec(5000);
-		spi_write_cd(ILI9163_GAMMASET, 1, 0x04); // 0x04
-		uSec(1000);
-		spi_write_cd(ILI9163_GAMRSEL, 1, 0x01);
-		uSec(1000);
+		lcd_run_init_seq(ili9163_seq);
 		if (Option.BGR)
 			spi_write_command(ILI9163_DINVON);
 		spi_write_command(ILI9163_NORML);
-		spi_write_cd(ILI9163_DFUNCTR, 2, 0b11111111, 0b00000110);																	 //
-		spi_write_cd(ILI9163_PGAMMAC, 15, 0x36, 0x29, 0x12, 0x22, 0x1C, 0x15, 0x42, 0xB7, 0x2F, 0x13, 0x12, 0x0A, 0x11, 0x0B, 0x06); // Positive Gamma Correction Setting
-		spi_write_cd(ILI9163_NGAMMAC, 15, 0x09, 0x16, 0x2D, 0x0D, 0x13, 0x15, 0x40, 0x48, 0x53, 0x0C, 0x1D, 0x25, 0x2E, 0x34, 0x39); // Negative Gamma Correction Setting
-		spi_write_cd(ILI9163_FRMCTR1, 2, 0x08, 0x02);																				 // 0x0C//0x08
-		uSec(1000);
-		spi_write_cd(ILI9163_DINVCTR, 1, 0x07);
-		uSec(1000);
-		spi_write_cd(ILI9163_PWCTR1, 2, 0x0A, 0x02); // 4.30 - 0x0A
-		uSec(1000);
-		spi_write_cd(ILI9163_PWCTR2, 1, 0x02);
-		uSec(1000);
-		spi_write_cd(ILI9163_VCOMCTR1, 2, 0x50, 99); // 0x50
-		uSec(1000);
-		spi_write_cd(ILI9163_VCOMOFFS, 1, 0); // 0x40
-		uSec(1000);
+		lcd_run_init_seq(ili9163_post_seq);
 		spi_write_cd(ILI9163_VSCLLDEF, 5, 0, 0, DisplayVRes, 0, 0);
-		spi_write_command(ILI9163_DISPON); // display ON
+		spi_write_command(ILI9163_DISPON);
 		uSec(1000);
-		switch (Option.DISPLAY_ORIENTATION)
-		{
-		case LANDSCAPE:
-			spi_write_cd(ILI9163_MADCTL, 1, ILI9163_Landscape);
-			break;
-		case PORTRAIT:
-			spi_write_cd(ILI9163_MADCTL, 1, ILI9163_Portrait);
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(ILI9163_MADCTL, 1, ILI9163_Landscape180);
-			break;
-		case RPORTRAIT:
-			spi_write_cd(ILI9163_MADCTL, 1, ILI9163_Portrait180);
-			break;
-		}
+		spi_write_cd(ILI9163_MADCTL, 1, madctl[Option.DISPLAY_ORIENTATION - 1]);
 		uSec(1000);
-		break;
+	}
+	break;
 	case ST7735:
 	case ST7735S:
 	case ST7735S_W:
+	{
+		static const uint8_t st7735_seq[] = {
+			0x01, LCD_INIT_DELAY, 2,					 // SOFTRESET, 20ms
+			0x11, LCD_INIT_DELAY, 50,					 // SLPOUT, 500ms
+			0xB1, 3, 0x01, 0x2C, 0x2D,					 // FRMCTR1
+			0xB2, 3, 0x01, 0x2C, 0x2D,					 // FRMCTR2
+			0xB3, 6, 0x01, 0x2C, 0x2D, 0x01, 0x2C, 0x2D, // FRMCTR3
+			0xB4, 1, 0x07,								 // INVCTR
+			0xC0, 3, 0xA2, 0x02, 0x84,					 // PWCTR1
+			0xC1, 1, 0xC5,								 // PWCTR2
+			0xC2, 2, 0x0A, 0x00,						 // PWCTR3
+			0xC3, 2, 0x8A, 0x2A,						 // PWCTR4
+			0xC4, 2, 0x8A, 0xEE,						 // PWCTR5
+			0xC5, 1, 0x0E,								 // VMCTR1
+			LCD_INIT_END};
+		static const uint8_t st7735_post_seq[] = {
+			0x3A, 1, 0x05,					 // COLMOD
+			0x2A, 4, 0x00, 0x00, 0x00, 0x7F, // CASET
+			0x2B, 4, 0x00, 0x00, 0x00, 0x9F, // RASET
+			0xE0, 16, 0x02, 0x1C, 0x07, 0x12, 0x37, 0x32, 0x29, 0x2D,
+			0x25, 0x29, 0x2B, 0x39, 0x00, 0x01, 0x03, 0x10, // GMCTRP1
+			0xE1, 16, 0x03, 0x1D, 0x07, 0x06, 0x2E, 0x2C, 0x29, 0x2D,
+			0x2E, 0x2E, 0x37, 0x3F, 0x00, 0x00, 0x02, 0x10, // GMCTRN1
+			0x13, LCD_INIT_DELAY, 1,						// NORON, 10ms
+			0x29, 0,										// DISPON
+			LCD_INIT_END};
 		ResetController();
-		spi_write_command(ILI9341_SOFTRESET); // software reset
-		uSec(20000);
-		spi_write_command(ST7735_SLPOUT); // out of sleep mode
-		uSec(500000);
-		spi_write_cd(ST7735_FRMCTR1, 3, 0x01, 0x2C, 0x2d);					 // frame rate control - normal mode
-		spi_write_cd(ST7735_FRMCTR2, 3, 0x01, 0x2C, 0x2D);					 // frame rate control - idle mode
-		spi_write_cd(ST7735_FRMCTR3, 6, 0x01, 0x2c, 0x2D, 0x01, 0x2C, 0x2D); // frame rate control - partial mode
-		spi_write_cd(ST7735_INVCTR, 1, 0x07);								 // display inversion control
-		spi_write_cd(ST7735_PWCTR1, 3, 0xA2, 0x02, 0x84);					 // power control
-		spi_write_cd(ST7735_PWCTR2, 1, 0xC5);								 // power control
-		spi_write_cd(ST7735_PWCTR3, 2, 0x0A, 0x00);							 // power control
-		spi_write_cd(ST7735_PWCTR4, 2, 0x8A, 0x2A);							 // power control
-		spi_write_cd(ST7735_PWCTR5, 2, 0x8A, 0xEE);							 // power control
-		spi_write_cd(ST7735_VMCTR1, 1, 0x0E);								 // power control
+		lcd_run_init_seq(st7735_seq);
 		if (Option.DISPLAY_TYPE == ST7735 || Option.DISPLAY_TYPE == ST7735S_W)
-			Option.BGR ? spi_write_command(ST7735_INVON) : spi_write_command(ST7735_INVOFF); // don't invert display
+			Option.BGR ? spi_write_command(ST7735_INVON) : spi_write_command(ST7735_INVOFF);
 		else
 			Option.BGR ? spi_write_command(ST7735_INVOFF) : spi_write_command(ST7735_INVON);
-		spi_write_cd(ST7735_COLMOD, 1, 0x05);		  // set color mode
-		spi_write_cd(ST7735_CASET, 4, 0, 0, 0, 0x7F); // column addr set
-		spi_write_cd(ST7735_RASET, 4, 0, 0, 0, 0x9F); // row addr set
-		spi_write_cd(ST7735_GMCTRP1, 16, 0x02, 0x1c, 0x07, 0x12, 0x37, 0x32, 0x29, 0x2D, 0x25, 0x29, 0x2B, 0x39, 0x00, 0x01, 0x03, 0x10);
-		spi_write_cd(ST7735_GMCTRN1, 16, 0x03, 0x1d, 0x07, 0x06, 0x2E, 0x2c, 0x29, 0x2d, 0x2E, 0x2E, 0x37, 0x3f, 0x00, 0x00, 0x02, 0x10);
-		spi_write_command(ST7735_NORON); // normal display on
-		uSec(10000);
-		spi_write_command(ST7735_DISPON);
-		switch (Option.DISPLAY_ORIENTATION)
+		lcd_run_init_seq(st7735_post_seq);
 		{
-		case LANDSCAPE:
-			spi_write_cd(ST7735_MADCTL, 1, ST7735_Landscape | (Option.DISPLAY_TYPE == ST7735 ? 0 : 8));
-			break;
-		case PORTRAIT:
-			spi_write_cd(ST7735_MADCTL, 1, ST7735_Portrait | (Option.DISPLAY_TYPE == ST7735 ? 0 : 8));
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(ST7735_MADCTL, 1, ST7735_Landscape180 | (Option.DISPLAY_TYPE == ST7735 ? 0 : 8));
-			break;
-		case RPORTRAIT:
-			spi_write_cd(ST7735_MADCTL, 1, ST7735_Portrait180 | (Option.DISPLAY_TYPE == ST7735 ? 0 : 8));
-			break;
+			uint8_t m = (Option.DISPLAY_TYPE == ST7735) ? 0 : 8;
+			static const uint8_t madctl[] = {ST7735_Landscape, ST7735_Portrait,
+											 ST7735_Landscape180, ST7735_Portrait180};
+			spi_write_cd(ST7735_MADCTL, 1, madctl[Option.DISPLAY_ORIENTATION - 1] | m);
 		}
-		break;
+	}
+	break;
 	case ST7789:
 	case ST7789A:
 	case ST7789B:
 #if PICOMITERP2350
 	case ST7789C:
 #endif
+	{
+		static const uint8_t st7789_seq[] = {
+			0x01, LCD_INIT_DELAY, 15,		   // SWRESET, 150ms
+			0x11, LCD_INIT_DELAY, 50,		   // SLPOUT,  500ms
+			0x3A, 1 | LCD_INIT_DELAY, 0x55, 1, // COLMOD 16-bit, 10ms
+			LCD_INIT_END};
+		static const uint8_t st7789_post_seq[] = {
+			0x13, LCD_INIT_DELAY, 1,  // NORON,   10ms
+			0x29, LCD_INIT_DELAY, 50, // DISPON,  500ms
+			LCD_INIT_END};
+		static const uint8_t madctl[] = {ST7735_Landscape, ST7735_Portrait,
+										 ST7735_Landscape180, ST7735_Portrait180};
 		ResetController();
-		spi_write_command(ST77XX_SWRESET);
-		uSec(150000);
-		spi_write_command(ST77XX_SLPOUT);
-		uSec(500000);
-		spi_write_command(ST77XX_COLMOD);
-		spi_write_data(0x55);
+		lcd_run_init_seq(st7789_seq);
+		spi_write_command(Option.BGR ? ST77XX_INVOFF : ST77XX_INVON);
 		uSec(10000);
-		//            if(Option.DISPLAY_TYPE==ST7789){spi_write_command(ST77XX_CASET); spi_write_data(0x0); spi_write_data(0x0); spi_write_data(0x0); spi_write_data(239);}
-		//			else if(Option.DISPLAY_ORIENTATION & 1){spi_write_command(ST77XX_CASET); spi_write_data(0x0); spi_write_data(40); spi_write_data(0x1); spi_write_data(23);}
-		//				 else {spi_write_command(ST77XX_CASET); spi_write_data(0x0); spi_write_data(52); spi_write_data(0x0); spi_write_data(186);}
-		//            if(Option.DISPLAY_TYPE==ST7789){spi_write_command(ST77XX_RASET); spi_write_data(0x0); spi_write_data(0); spi_write_data(0); spi_write_data(239);}
-		//			else if(Option.DISPLAY_ORIENTATION & 1){spi_write_command(ST77XX_RASET); spi_write_data(0x0); spi_write_data(53); spi_write_data(0); spi_write_data(187);}
-		//				 else {spi_write_command(ST77XX_RASET); spi_write_data(0x0); spi_write_data(40); spi_write_data(1); spi_write_data(23);}
-		if (Option.BGR)
-			spi_write_command(ST77XX_INVOFF);
-		else
-			spi_write_command(ST77XX_INVON);
-		uSec(10000);
-		spi_write_command(ST77XX_NORON);
-		uSec(10000);
-		spi_write_command(ST77XX_DISPON);
-		uSec(500000);
-		switch (Option.DISPLAY_ORIENTATION)
-		{
-		case LANDSCAPE:
-			spi_write_cd(ST7735_MADCTL, 1, ST7735_Landscape);
-			break;
-		case PORTRAIT:
-			spi_write_cd(ST7735_MADCTL, 1, ST7735_Portrait);
-			break;
-		case RLANDSCAPE:
-			spi_write_cd(ST7735_MADCTL, 1, ST7735_Landscape180);
-			break;
-		case RPORTRAIT:
-			spi_write_cd(ST7735_MADCTL, 1, ST7735_Portrait180);
-			break;
-		}
-		break;
+		lcd_run_init_seq(st7789_post_seq);
+		spi_write_cd(ST7735_MADCTL, 1, madctl[Option.DISPLAY_ORIENTATION - 1]);
+	}
+	break;
 	case N5110:
 		ResetController();
 		spi_write_command(0x21); // LCD Extended Commands.
@@ -1216,33 +918,16 @@ void MIPS16 InitDisplaySPI(int InitOnly)
 		uSec(20000);
 		break;
 	case SSD1306SPI:
+	{
+		static const uint8_t ssd1306_seq[] = {
+			0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
+			0x8D, 0x14, 0x20, 0x00, 0xA1, 0xC8, 0xDA, 0x12,
+			0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF};
 		ResetController();
-		spi_write_command(0xAE); // DISPLAYOFF
-		spi_write_command(0xD5); // DISPLAYCLOCKDIV
-		spi_write_command(0x80); // the suggested ratio &H80
-		spi_write_command(0xA8); // MULTIPLEX
-		spi_write_command(0x3F); //
-		spi_write_command(0xD3); // DISPLAYOFFSET
-		spi_write_command(0x0);	 // no offset
-		spi_write_command(0x40); // STARTLINE
-		spi_write_command(0x8D); // CHARGEPUMP
-		spi_write_command(0x14);
-		spi_write_command(0x20); // MEMORYMODE
-		spi_write_command(0x00); //&H0 act like ks0108
-		spi_write_command(0xA1); // SEGREMAP OR 1
-		spi_write_command(0xC8); // COMSCANDEC
-		spi_write_command(0xDA); // COMPINS
-		spi_write_command(0x12);
-		spi_write_command(0x81); // SETCONTRAST
-		spi_write_command(0xCF);
-		spi_write_command(0xd9); // SETPRECHARGE
-		spi_write_command(0xF1);
-		spi_write_command(0xDB); // VCOMDETECT
-		spi_write_command(0x40);
-		spi_write_command(0xA4); // DISPLAYALLON_RESUME
-		spi_write_command(0xA6); // NORMALDISPLAY
-		spi_write_command(0xAF); // DISPLAYON
-		break;
+		for (unsigned i = 0; i < sizeof(ssd1306_seq); i++)
+			spi_write_command(ssd1306_seq[i]);
+	}
+	break;
 	case ST7920:
 		PackHorizontal = 1;
 		gpio_put(LCD_CD_PIN, GPIO_PIN_RESET);
@@ -1357,6 +1042,31 @@ void spi_write_cd(unsigned char command, int data, ...)
 	for (i = 0; i < data; i++)
 		spi_write_data((char)va_arg(ap, int));
 	va_end(ap);
+}
+
+/*  Compact LCD init-sequence runner.
+ *
+ *  Sequence format (const uint8_t[]):
+ *    Each record:  cmd, flags_count [, data0 .. dataN-1] [, delay_10ms]
+ *      cmd         - SPI command byte
+ *      flags_count - bits 6:0  number of data bytes (0-127)
+ *                    bit  7    if set a delay byte follows the data
+ *      delay_10ms  - delay in units of 10 ms (1-255 -> 10-2550 ms)
+ *    Terminator:   a zero byte (cmd == 0x00) ends the sequence.
+ */
+static void MIPS16 lcd_run_init_seq(const uint8_t *seq)
+{
+	uint8_t cmd;
+	while ((cmd = *seq++) != LCD_INIT_END)
+	{
+		uint8_t x = *seq++;
+		uint8_t count = x & 0x7F;
+		spi_write_command(cmd);
+		for (uint8_t i = 0; i < count; i++)
+			spi_write_data(*seq++);
+		if (x & LCD_INIT_DELAY)
+			uSec((uint32_t)(*seq++) * 10000);
+	}
 }
 
 void spi_write_CommandData(const uint8_t *pCommandData, uint8_t datalen)
