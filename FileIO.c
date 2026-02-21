@@ -4173,12 +4173,17 @@ char __not_in_flash_func(FileGetChar)(int fnbr)
         return ch;
     }
 }
-// bulk read data. For Fat file system can only be used if FileGetchar has not been called first
+// bulk read data
 int __not_in_flash_func(FileGetData)(int fnbr, void *buff, int count, unsigned int *read)
 {
     if (filesource[fnbr] == FATFSFILE)
     {
         FSerror = f_read(FileTable[fnbr].fptr, buff, count, (UINT *)read);
+        // Invalidate the read buffer so FileEOF falls through to f_eof()
+        // and any subsequent FileGetChar refills the buffer from the new position
+        lastfptr[fnbr] = -1;
+        bw[fnbr] = 1;
+        buffpointer[fnbr] = 1;
     }
     else
     {
